@@ -300,6 +300,38 @@ def test_runs_with_the_same_folder_name_are_never_paired(experiment, tmp_path):
         coverage_input(combined, Design("ctrl", SPEED, repeats_paired=True))
 
 
+def test_a_run_label_never_equals_another_runs_folder_name(tmp_path):
+    from opticalflow3d_profiler.analysis import run_labels
+
+    # Re-validation R4: seriesC/run-1-<hash> was given the label generated for seriesA/run-1.
+    first, second = tmp_path / "seriesA" / "run-1", tmp_path / "seriesB" / "run-1"
+    generated = run_labels([first, second])[first]
+    third = tmp_path / "seriesC" / generated
+    labels = run_labels([first, second, third])
+    assert len(set(labels.values())) == 3
+    assert labels[first] == generated == run_labels([first])[first]  # stable for one run
+    with pytest.raises(InputError, match="same run folder"):
+        run_labels([first, tmp_path / "seriesA" / "x" / ".." / "run-1"])
+
+
+def test_repeated_or_shadowed_feature_columns_are_refused(experiment, tmp_path):
+    _, _, run, _ = experiment
+    copy = _copy_run(run, tmp_path / "copy", "c-")
+    table = copy / "features" / "features_per_fov.csv"
+    text = table.read_text(encoding="utf-8").splitlines()
+    header = text[0].split(",")
+    qc = next(c for c in header if c.startswith("qc_"))
+    shadow = [",".join([*header, "Nuclei__" + qc])] + [r + "," + r.split(",")[header.index(qc)]
+                                                       for r in text[1:]]  # fmt: skip
+    table.write_text("\n".join(shadow) + "\n", encoding="utf-8")
+    with pytest.raises(InputError, match="share a feature key"):
+        load_runs([copy])
+    table.write_text("\n".join([",".join([*header, qc])] + [r + ",0" for r in text[1:]]) + "\n",
+                     encoding="utf-8")  # fmt: skip
+    with pytest.raises(InputError, match="repeated column names"):
+        load_runs([copy])
+
+
 def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
     import hashlib
 
