@@ -10,7 +10,7 @@ Put your functions in a package under `src/`: a folder with an `__init__.py` fil
 
 ```text
 src/
-|-- PYTHON_PROJ_NAME/
+|-- opticalflow3d_profiler/
 |   |-- __init__.py
 |   |-- my_script.py
 |   |-- subpackage/
@@ -22,7 +22,7 @@ src/
 `__init__.py` tells Python that the folder is a package. It can stay empty. To let notebooks import your main functions directly from the package, re-export them:
 
 ```python
-# src/PYTHON_PROJ_NAME/__init__.py
+# src/opticalflow3d_profiler/__init__.py
 from .my_script import run_analysis, load_config
 
 __all__ = ["run_analysis", "load_config"]
@@ -44,19 +44,19 @@ Your notebooks import the code as a package:
 
 **Import the whole package:**
 ```python  
-import PYTHON_PROJ_NAME
+import opticalflow3d_profiler
 ```
 
 If your folder under `src/` is called `celltools`, then `import celltools` will work because `src/celltools/__init__.py` exists.
 
 **Import function:**
 ```python  
-from PYTHON_PROJ_NAME import my_script
+from opticalflow3d_profiler import my_script
 ```
 
 **Import submodule:**
 ```python  
-from PYTHON_PROJ_NAME.subpackage import submodule1
+from opticalflow3d_profiler.subpackage import submodule1
 ```
 
 ## 4. Publish the code on PyPI (optional)

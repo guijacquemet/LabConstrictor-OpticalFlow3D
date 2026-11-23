@@ -45,8 +45,8 @@ def read_readme():
 REPOSITORY = os.environ.get("GITHUB_REPOSITORY")
 
 setup(
-    name="PYTHON_PROJ_NAME",
-    version="VERSION_NUMBER",
+    name="opticalflow3d_profiler",
+    version="0.0.1",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
     project_urls={"Source": f"https://github.com/{REPOSITORY}"} if REPOSITORY else {},

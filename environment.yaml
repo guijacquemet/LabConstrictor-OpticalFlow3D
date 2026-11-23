@@ -1,4 +1,4 @@
-name: LOWER_PROJ_NAME
+name: opticalflow3d profiler
 channels:
   - conda-forge
   - bioconda
