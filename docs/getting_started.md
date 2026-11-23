@@ -68,7 +68,7 @@ to the Welcome notebook, which tells you whether a newer notebook version exists
    pip install "git+https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D" \
      "morphocoverage @ git+https://github.com/CellMigrationLab/MorphoCoverage@209b9be40a14aef5a5e244a8d031a4828f1e96ef" \
      "tqdm==4.70.1" \
-     "morphobricks-normalization @ git+https://github.com/CellMigrationLab/morphobricks-normalization@f2aa7321b24ab49ffe9059154c54eb659741162a"
+     "morphobricks-normalization @ git+https://github.com/CellMigrationLab/morphobricks-normalization@26112a5b5019d3c1af91450aeabf623a05d6ba36"
    ```
    It ends by printing `Ready.`
 4. *(Optional)* Run **Mount Google Drive (Colab only)** to reach your images. Your Drive then
@@ -124,7 +124,7 @@ Then run the notebook from Section 0. Outside Colab, the **Install** cell only p
 |---|---|
 | OpticalFlow3D (vendored, unchanged) | commit `6b88604` of aicjanelia/OpticalFlow3D; the app refuses to run if the file's SHA-256 differs |
 | MorphoCoverage | commit `209b9be40a14aef5a5e244a8d031a4828f1e96ef` |
-| morphobricks-normalization | commit `f2aa7321b24ab49ffe9059154c54eb659741162a` |
+| morphobricks-normalization | commit `26112a5b5019d3c1af91450aeabf623a05d6ba36` |
 | Python | 3.11.13 |
 
 Every run records the versions it actually used (Python, platform, each dependency with its Git
