@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=https://cellmigrationlab.github.io/LabConstrictor-Site/schema/labconstrictor-app.schema.json
+schema: 1
+name: OpticalFlow3D Profiler
+summary: Quantify motion in 3D fluorescence microscopy time-lapse images
+kind: analysis
+hosts:
+- notebook
+distribution:
+  installer: true
