@@ -96,7 +96,7 @@ def flow_overview(
         vx[sel][ok[sel]],
         vy[sel][ok[sel]],
         np.arctan2(vy[sel], vx[sel])[ok[sel]],
-        cmap="twilight",
+        cmap="hsv",  # cyclic and bright everywhere: readable on dark images
         clim=(-np.pi, np.pi),  # fixed full circle: equal directions get equal colours
         angles="xy",
         pivot="mid",
