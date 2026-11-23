@@ -5,6 +5,9 @@
 `6b88604a75319d80002de47ca993ce8b55fb9c46`, distributed under the BSD 3-Clause licence in
 `LICENSE` (Copyright (c) 2025, Howard Hughes Medical Institute).
 
+Paper: Lee et al. (2026), *J. Cell Sci.* 139(21), jcs264851,
+https://doi.org/10.1242/jcs.264851.
+
 - SHA-256 of `calc_flow.py`: `e40c6cfff644f2ae57a244e2ef1aa7c2a8e27cc7d361534182cdf1cb49338a05`.
   `opticalflow3d_profiler.flow_backend` refuses to run if the file differs.
 - `_license.py` holds the licence text as a Python constant, because the LabConstrictor
