@@ -97,6 +97,7 @@ def flow_overview(
         vy[sel][ok[sel]],
         np.arctan2(vy[sel], vx[sel])[ok[sel]],
         cmap="twilight",
+        clim=(-np.pi, np.pi),  # fixed full circle: equal directions get equal colours
         angles="xy",
         pivot="mid",
     )
@@ -112,7 +113,7 @@ def flow_overview(
             pivot="mid",
             alpha=0.6,
         )
-    axes[0].set_title("Flow vectors (colour = direction, y down)")
+    axes[0].set_title("Flow vectors (colour = direction, −180° to 180°, y down)")
     speed = axes[1].imshow(np.hypot(vx, vy), cmap="Blues")
     fig.colorbar(speed, ax=axes[1], fraction=0.046, label="XY speed (px/frame)")
     axes[1].set_title("XY optical-flow speed")

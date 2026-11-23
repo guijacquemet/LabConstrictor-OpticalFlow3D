@@ -56,6 +56,31 @@ gain*; XY speed is the default; Z-dependent features are experimental and exclud
 PCA by default; foreground size and axial extent are exported as QC confounders because
 the gain depends on them.
 
+## Synthetic end-to-end demo (`tools/demo_synthetic.py`)
+
+A 12-field-of-view experiment: 256 × 256 × 11 × 15, 80 nuclei, noise SD 20, calibration
+0.65 / 0.65 / 2.0 µm and 1 min. `ctrl` nuclei move at 0.3 px/frame in random directions;
+`drug` nuclei move at 0.6 px/frame within ±15° of +x. All 17 expectations passed:
+
+| Check | Result |
+|---|---|
+| speed ratio drug/ctrl (true 2.0) | 2.14 |
+| speed gain ctrl / drug | 0.55 / 0.59 |
+| global XY coherence drug / ctrl | 0.987 / 0.078 |
+| dominant direction drug | within 2.9° of 0° |
+| net axial drift (true vz = 0) | ≤ 0.0022 slice/frame |
+| axial noise floor (true vz = 0) | mean \|vz\| ≤ 0.020 slice/frame |
+| PCA | PC1 (91 % of variance) separates the conditions |
+| threshold versus ground-truth-mask foreground | median speed within 0.8 % |
+
+**Axial noise floor.** With no true axial motion, mean |vz| is about 0.02 slices/frame,
+about 5 % of the lateral speed in voxel units. With 2 µm slices and 0.65 µm pixels, physical
+scaling multiplies it about 3×. In µm/min, |vz| features of slowly moving samples are then
+dominated by this floor. This is one more reason why axial features are experimental.
+
+Runtime: 645 s for the whole demo (12 fields of view, flow, features, QC figures, PCA and a
+second feature extraction), 0.47 GB peak RSS, on a 4-vCPU VM.
+
 ## Resources (measured)
 
 | Input window | Time | Peak RSS | Estimate |
