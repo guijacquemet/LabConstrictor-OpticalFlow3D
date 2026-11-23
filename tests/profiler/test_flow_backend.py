@@ -140,11 +140,20 @@ def test_correction_code_identity_invalidates_cached_corrected_flow(flow_run, mo
     before = flow_backend.flow_identity(spec, header, corrected, source)
     assert before["brightness_correction"]["time_series_sha256"]
     assert "brightness_correction" not in flow_backend.flow_identity(spec, header, plain, source)
-    monkeypatch.setattr(
-        flow_backend, "implementation_identity", lambda: {"version": "other", "commit": "x"}
-    )
-    after = flow_backend.flow_identity(spec, header, corrected, source)
-    assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
+    # Re-validation M2: a real change of the bytes of either module changes the identity.
+    import morphobricks_normalization.time_series as time_series
+    from opticalflow3d_profiler import brightness
+
+    original = Path.read_bytes
+    for edited in (time_series.__file__, brightness.__file__):
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                Path, "read_bytes",
+                lambda self, e=edited: original(self) + (b"#" if str(self) == e else b""),
+            )  # fmt: skip
+            after = flow_backend.flow_identity(spec, header, corrected, source)
+        assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
+    assert "commit" not in before["brightness_correction"]  # a wheel install has none
 
 
 def test_a_failing_window_closes_progress_and_removes_the_partial_folder(

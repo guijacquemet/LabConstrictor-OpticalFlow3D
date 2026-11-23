@@ -35,14 +35,22 @@ from .results import distribution_identity
 def implementation_identity() -> dict[str, str | None]:
     """Return the identity of the correction code (part of the flow identity when correcting).
 
-    The morphobricks-normalization version, its commit and the SHA-256 of its
-    ``time_series`` module.
+    The morphobricks-normalization version and the SHA-256 of the code that changes the
+    numbers: its ``time_series`` module and this adapter, which chooses the reference frame
+    and applies the correction (re-validation M2). The commit is not part of it: a wheel
+    install records none, and identical code must keep one identity; it is recorded in the
+    run manifest's environment instead.
     """
     from morphobricks_normalization import time_series
 
-    identity = distribution_identity("morphobricks-normalization")
-    source = Path(time_series.__file__).read_bytes()
-    return {**identity, "time_series_sha256": hashlib.sha256(source).hexdigest()}
+    def sha256(module_file: str) -> str:
+        return hashlib.sha256(Path(module_file).read_bytes()).hexdigest()
+
+    return {
+        "version": distribution_identity("morphobricks-normalization")["version"],
+        "time_series_sha256": sha256(time_series.__file__),
+        "adapter_sha256": sha256(__file__),
+    }
 
 
 WARNING_CHANGE_PER_FRAME = 0.02

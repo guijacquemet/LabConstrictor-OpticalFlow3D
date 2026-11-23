@@ -107,17 +107,17 @@ def write_csv(path: Path, table: pd.DataFrame) -> None:
 
 
 def environment() -> dict[str, str]:
-    """Return the application, Python, platform and dependency versions."""
+    """Return the application, Python, platform and dependency versions (with git commits)."""
     versions = {
         "opticalflow3d_profiler": __version__,
         "python": sys.version.split()[0],
         "platform": platform.platform(),
     }
     for name in DEPENDENCIES:
-        try:
-            versions[name] = importlib_metadata.version(name)
-        except importlib_metadata.PackageNotFoundError:
-            versions[name] = "not installed"
+        found = distribution_identity(name)
+        versions[name] = found["version"] or "not installed"
+        if found["commit"]:  # a git install: the commit identifies the code exactly
+            versions[name] += f" (git {found['commit']})"
     return versions
 
 
