@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .brightness import WARNING_CHANGE_PER_FRAME
 from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, ImageSpec
 from .config import to_record as record
 from .experiment import METADATA_COLUMNS
@@ -164,6 +165,12 @@ def frame_rows(
             settings.calibration,
             settings.features,
         )
+        recorded = result.manifest.get("outputs", [{}] * (index + 1))[index]
+        features.put(
+            "qc_brightness_change_per_frame",
+            recorded.get("brightness_change_per_frame"),
+            "not recorded (optical flow from an external or older result)",
+        )
         row: dict[str, object] = {
             "fov_uid": result.name,
             "output_index": index,
@@ -176,6 +183,26 @@ def frame_rows(
         )
         rows.append(row)
     return rows
+
+
+def brightness_warning(result: FlowResult, equalised: bool) -> str:
+    """Return a warning when the global brightness changes markedly, or an empty string."""
+    changes = [
+        abs(o["brightness_change_per_frame"])
+        for o in result.manifest.get("outputs", [])
+        if o.get("brightness_change_per_frame") is not None
+    ]
+    if not changes or max(changes) <= WARNING_CHANGE_PER_FRAME:
+        return ""
+    advice = (
+        "brightness equalisation was applied to the optical-flow input"
+        if equalised
+        else "optical flow reads part of it as motion; consider brightness equalisation"
+    )
+    return (
+        f"The global brightness changes by up to {max(changes):.1%} per frame ({advice}). "
+        "Compare qc_brightness_change_per_frame between conditions."
+    )
 
 
 def foreground_reader(spec: ForegroundSpec, dims: dict[str, int]) -> tuple[Callable, dict]:
@@ -240,6 +267,11 @@ def process_fov(
             if i.severity == "warning"
         ]
         result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from)
+        warnings += [
+            w
+            for w in [brightness_warning(result, settings.flow.brightness_equalisation != "none")]
+            if w
+        ]
         if flow_only:
             status.update(
                 status="flow complete",

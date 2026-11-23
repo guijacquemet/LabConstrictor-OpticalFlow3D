@@ -34,6 +34,9 @@ class SyntheticMovie:
         Peak height above background, and background level.
     noise_sd
         Standard deviation of additive Gaussian noise (0 for none).
+    brightness_ramp
+        Global multiplicative brightness change per frame: frame ``t`` is multiplied by
+        ``(1 + brightness_ramp) ** (t - T // 2)`` (background included, before noise).
     seed
         Random seed of positions and noise.
     """
@@ -48,6 +51,7 @@ class SyntheticMovie:
     background: float = 100.0
     noise_sd: float = 0.0
     seed: int = 0
+    brightness_ramp: float = 0.0
 
 
 def nucleus_centres(movie: SyntheticMovie) -> np.ndarray:
@@ -102,6 +106,9 @@ def render(movie: SyntheticMovie, dtype: str = "uint16") -> np.ndarray:
                 -((x - centre[2]) ** 2 + (y - centre[1]) ** 2) / (2 * movie.sigma_xy**2)
                 - (z - centre[0]) ** 2 / (2 * movie.sigma_z**2)
             )
+    if movie.brightness_ramp:
+        gains = (1 + movie.brightness_ramp) ** (np.arange(n_t) - n_t // 2)
+        out *= gains[:, None, None, None]
     if movie.noise_sd > 0:
         out += np.random.default_rng(movie.seed + 1).normal(0, movie.noise_sd, out.shape)
     if np.issubdtype(np.dtype(dtype), np.integer):

@@ -81,6 +81,17 @@ dominated by this floor. This is one more reason why axial features are experime
 Runtime: 645 s for the whole demo (12 fields of view, flow, features, QC figures, PCA and a
 second feature extraction), 0.47 GB peak RSS, on a 4-vCPU VM.
 
+## First real crop: brightness change (day6_wt_5-1, 15 × 11 × 256 × 256)
+
+The movie brightens 2.8× over 15 time points (+3 % to +11 % per frame). On the raw data, the
+optical flow reads this as motion: XY speed 1.1-2.9 px/frame, falling as the brightening
+slows, and a systematic vz of +0.3 to +1.3 slices/frame. With the opt-in
+`brightness_equalisation="global_mean"`, XY speed is 0.9-1.25 px/frame and roughly constant,
+and vz is about 0 (+0.23 in the steepest window). Synthetic static nuclei with an 8 %/frame
+ramp show the same effect: equalisation removes more than 99 % of the spurious motion
+(`tests/profiler/test_brightness.py`). Every output now records
+`qc_brightness_change_per_frame`, and changes above 2 %/frame give a warning.
+
 ## Resources (measured)
 
 | Input window | Time | Peak RSS | Estimate |

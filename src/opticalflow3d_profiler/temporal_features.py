@@ -25,7 +25,7 @@ def _stats_for(definition: FeatureDef) -> tuple[str, ...]:
     if definition.applicability == ORIENTATION:
         return ("circmean", "circsd") if name.endswith("_deg") else ("mean",)
     if definition.applicability == QC:
-        if name == "qc_reliability_threshold":
+        if name in ("qc_reliability_threshold", "qc_brightness_change_per_frame"):
             return ("mean", "min", "max")
         return ("mean", "min") if name in QC_MINIMUM else ("mean",)
     extremes = definition.family == "magnitude" and name.endswith(EXTREMES[:2])

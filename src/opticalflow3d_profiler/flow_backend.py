@@ -25,6 +25,12 @@ import tifffile
 
 from . import __version__
 from ._upstream import UPSTREAM_COMMIT, UPSTREAM_FILE_SHA256, UPSTREAM_REPOSITORY
+from .brightness import (
+    brightness_change,
+    equalise_window,
+    match_histograms_window,
+    window_means,
+)
 from .config import FlowParameters, ImageSpec, to_record
 from .image_io import ImageHeader, dimensions, file_identity, read_frames, validate_image
 from .validation import InputError, check_time_and_depth, output_frame_map, raise_for_errors
@@ -240,6 +246,30 @@ def compute_frame(window: np.ndarray, params: FlowParameters) -> dict[str, np.nd
     }
 
 
+def flow_window(window: np.ndarray, params: FlowParameters) -> tuple[dict, dict[str, object]]:
+    """Measure the window's brightness change, equalise it if asked, and run upstream.
+
+    Returns
+    -------
+    tuple
+        The upstream outputs (:func:`compute_frame`) and the brightness record of the
+        output: frame means, relative change per frame and the equalisation factors
+        (``None`` without equalisation).
+    """
+    means = window_means(window)
+    record: dict[str, object] = {
+        "window_mean_intensity": [float(m) for m in means],
+        "brightness_change_per_frame": brightness_change(means),
+        "equalisation_factors": None,
+    }
+    if params.brightness_equalisation == "global_mean":
+        window, record["equalisation_factors"] = equalise_window(window, means)
+    elif params.brightness_equalisation == "histogram_match":
+        window = match_histograms_window(window)
+        record["histogram_matched_to_frame"] = len(means) // 2
+    return compute_frame(window, params), record
+
+
 def _write_tiff_hashed(path: Path, data: np.ndarray) -> str:
     """Write one float TIFF as upstream does and return its SHA-256."""
     tifffile.imwrite(path, data, photometric="minisblack")
@@ -296,9 +326,9 @@ def run_flow(
     for index, t in enumerate(identity["frame_map"]):
         half = params.half_window
         window = read_frames(spec, header, list(range(t - half, t + half + 1)))
-        frame = compute_frame(window, params)
+        frame, brightness = flow_window(window, params)
         del window
-        record = {"output_index": index, "source_frame": t, "files": {}}
+        record = {"output_index": index, "source_frame": t, "files": {}, **brightness}
         for component in COMPONENTS:
             file_name = f"{name}_{component}_t{t:04d}.tiff"
             record["files"][component] = {

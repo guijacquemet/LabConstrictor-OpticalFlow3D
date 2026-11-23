@@ -288,6 +288,14 @@ QC_ROWS = [
         "1",
     ),
     (
+        "qc_brightness_change_per_frame",
+        "Global brightness change across the optical-flow time window (illumination, focus, "
+        "bleaching or expression). Optical flow reads part of a brightness change as motion; "
+        "values above 0.02 are flagged.",
+        "least-squares slope of the window frames' mean raw intensity / central frame's mean",
+        "1/frame",
+    ),
+    (
         "qc_invalid_reliability_fraction",
         "Fraction of finite-velocity foreground voxels with non-finite reliability (never "
         "reliable, never used to set a threshold).",

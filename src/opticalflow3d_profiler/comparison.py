@@ -31,6 +31,7 @@ CONFOUNDERS = (
     "qc_object_mean_z_extent__tmean",
     "qc_reliable_fraction__tmean",
     "qc_reliability_threshold__tmean",
+    "qc_brightness_change_per_frame__tmean",
 )
 """QC columns compared alongside the readouts as potential confounders."""
 

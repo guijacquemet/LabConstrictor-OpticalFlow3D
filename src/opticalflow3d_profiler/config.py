@@ -16,6 +16,7 @@ SpeedMode = Literal["xy", "xyz"]
 ReliabilityMode = Literal["absolute", "percentile", "none"]
 ForegroundMode = Literal["mask", "threshold", "none"]
 OutputDtype = Literal["float64", "float32"]
+BrightnessEqualisation = Literal["none", "global_mean", "histogram_match"]
 MaskPlaneRule = Literal["", "same_mask_for_every_z"]
 
 CANONICAL_AXES = "TZYX"
@@ -69,12 +70,21 @@ class FlowParameters:
     output_dtype
         Precision of the saved velocity files. ``float64`` is what upstream returns and
         writes; ``float32`` halves the disk use and is recorded as a deliberate choice.
+    brightness_equalisation
+        ``"none"`` (default): upstream receives the raw intensities. ``"global_mean"``
+        (opt-in): within each time window, every frame is scaled so that its mean equals
+        the central frame's mean before upstream runs, so that a global brightness change
+        is not read as motion. ``"histogram_match"`` (opt-in): every frame's histogram is
+        mapped onto the central frame's histogram (Fiji Bleach Correction "Histogram
+        Matching"; non-linear, so relative intensities change). Recorded in the flow identity
+        and manifest; features and thresholds always use the raw intensities.
     """
 
     xyz_sig: float = 3.0
     t_sig: float = 1.0
     w_sig: float = 4.0
     output_dtype: OutputDtype = "float64"
+    brightness_equalisation: BrightnessEqualisation = "none"
 
     @property
     def window_length(self) -> int:
