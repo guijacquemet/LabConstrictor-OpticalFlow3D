@@ -244,6 +244,15 @@ class FlowStep:
         self.xyz = widgets.FloatText(value=3.0, description="xyzSig (voxels)", style=STYLE)
         self.tsig = widgets.FloatText(value=1.0, description="tSig (frames)", style=STYLE)
         self.wsig = widgets.FloatText(value=4.0, description="wSig (voxels)", style=STYLE)
+        self.equalise = widgets.Dropdown(
+            options=[
+                ("none: raw intensities (default)", "none"),
+                ("equalise global brightness per window (opt-in)", "global_mean"),
+            ],
+            description="Brightness",
+            style=STYLE,
+            layout=WIDE,
+        )
         self.dtype = widgets.Dropdown(
             options=["float64", "float32"], style=STYLE, description="Saved precision"
         )
@@ -279,6 +288,12 @@ class FlowStep:
             [
                 widgets.HBox([self.xyz, self.tsig, self.wsig]),
                 self.dtype,
+                self.equalise,
+                widgets.HTML(
+                    "Brightness equalisation is off unless you choose it. Check "
+                    "qc_brightness_change_per_frame first: above 0.02 per frame, part of "
+                    "the measured motion is brightness change."
+                ),
                 self.parent,
                 self.run_name,
                 self.metadata_csv,
@@ -295,7 +310,9 @@ class FlowStep:
 
     def parameters(self) -> FlowParameters:
         """Return the upstream parameters from the widgets."""
-        return FlowParameters(self.xyz.value, self.tsig.value, self.wsig.value, self.dtype.value)
+        return FlowParameters(
+            self.xyz.value, self.tsig.value, self.wsig.value, self.dtype.value, self.equalise.value
+        )
 
     def metadata(self) -> pd.DataFrame:
         """Return the metadata: from the CSV, or one row for the confirmed image."""
