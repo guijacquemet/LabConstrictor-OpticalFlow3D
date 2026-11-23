@@ -118,6 +118,8 @@ def test_resource_estimate_full_size_dataset(tmp_path):
     assert estimate.n_outputs == 9
     assert 10e9 < estimate.peak_ram_bytes < 12e9
     assert estimate.output_bytes == 9 * 11 * 1840 * 1840 * 28
+    per_slice = estimate_resources(dims, 2, FlowParameters(mode="xy_per_slice"), tmp_path)
+    assert per_slice.output_bytes == 9 * 11 * 1840 * 1840 * 20  # no vz in per-slice mode
 
 
 def test_upstream_licence_ships_with_the_python_files():

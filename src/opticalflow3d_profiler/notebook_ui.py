@@ -40,7 +40,7 @@ from .flow_backend import estimate_resources
 from .flow_store import open_result
 from .image_io import ImageHeader, dimensions, inspect_tiff, read_frames, validate_image
 from .naming import find_column
-from .pipeline import RunSettings, run_experiment
+from .pipeline import RunSettings, checked_settings, run_experiment
 from .progress import TqdmTracker
 from .results import create_run
 from .validation import (
@@ -392,6 +392,7 @@ class SettingsStep:
         row = self.session.example
         metadata = self.session.metadata
         one = metadata[metadata["fov_uid"] == row["fov_uid"]]
+        checked_settings(settings)  # before the run folder: a refusal never uses up its name
         run = create_run(self.session.results_root / "examples")
         manifest = run_experiment(one, settings, run, progress=LOG_ONLY, tracker=TqdmTracker())
         self.session.settings = settings

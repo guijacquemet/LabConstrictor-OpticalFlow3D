@@ -1,5 +1,7 @@
 # MorphoBricks conventions in the OpticalFlow3D Profiler
 
+[:arrow_left: Documentation index](index.md)
+
 The profiler follows the MorphoBricks experiment folder layout and feature column names
 (reimplemented from the sources below), and hands the condition statistics and the report to
 **MorphoCoverage, a dependency** pinned to a commit (all MIT licence, CellMigrationLab).
@@ -41,7 +43,8 @@ The profiler follows the MorphoBricks experiment folder layout and feature colum
 - The MorphoBricks description files (`morphobricks.toml`, `experiment_design.csv`) are not
   read.
 
-A metadata CSV with the same columns plus `image_path` is still accepted.
+From Python, a metadata table with the same columns plus `image_path` is accepted by
+`experiment.validate_metadata` (a pandas DataFrame); the notebook reads experiment folders only.
 
 ## Feature tables and column names
 

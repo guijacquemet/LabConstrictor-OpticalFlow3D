@@ -34,7 +34,7 @@ def test_fov_dictionary_mirrors_the_frame_dictionary():
         assert [d.name for d in fov_defs] == [d.name for d in frame_defs]
         assert all(d.level == "fov" and d.undefined and d.formula for d in fov_defs)
         assert len([d for d in fov_defs if d.applicability == BIOLOGICAL]) >= (
-            20 if mode == "xy" else 12
+            20 if mode == "xy" else 10  # per-axis vx/vy columns are orientation descriptors
         )
     assert 30 <= len([d for d in frame_dictionary("xy") if d.applicability != QC]) <= 40
 
@@ -93,3 +93,12 @@ def test_image_paths_are_kept_literally():
     assert table["image_path"].iloc[0] == " /data/a.tif "
     with pytest.raises(InputError, match="empty"):
         validate_metadata(pd.DataFrame([metadata(image_path="  ")]))
+
+
+def test_per_axis_lateral_columns_are_never_readouts():
+    # Rotating the image changes how motion splits between x and y.
+    from opticalflow3d_profiler.feature_dictionary import ORIENTATION
+
+    for definition in frame_dictionary("xyz"):
+        if definition.name.startswith(("vx_", "vy_")):
+            assert definition.applicability == ORIENTATION, definition.name

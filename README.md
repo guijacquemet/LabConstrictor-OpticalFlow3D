@@ -6,6 +6,10 @@ algorithm (HHMI Janelia, BSD-3-Clause, unchanged copy pinned at commit `6b88604`
 velocity fields into motion profiles per field of view, and compares experimental conditions
 with [MorphoCoverage](https://github.com/CellMigrationLab/MorphoCoverage) (a pinned dependency).
 
+**Documentation:** [docs/index.md](docs/index.md): installation, data preparation, the notebook
+step by step, how it works, every feature explained ([feature glossary](docs/features.md)),
+quality control, outputs, limitations and troubleshooting.
+
 ## Install
 
 The installer appears on the [Releases page](https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D/releases)

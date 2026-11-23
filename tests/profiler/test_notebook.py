@@ -57,6 +57,15 @@ def write_movie(path, speed, seed):
     )
 
 
+def refused_settings_keep_the_run_name(settings, process, run):
+    """A refused setting raises before the run folder exists, so its name stays free."""
+    settings.rel_value.value = ""
+    with pytest.raises((InputError, ValueError)):
+        process.process()
+    assert not run.exists()
+    settings.rel_value.value = "0.001"
+
+
 def test_all_steps_drive_end_to_end(tmp_path):
     rows = []
     for i, (condition, rep, speed) in enumerate(
@@ -96,6 +105,7 @@ def test_all_steps_drive_end_to_end(tmp_path):
     process = app["process"]
     process.run_name.value = "run1"
     process.qc.value = False
+    refused_settings_keep_the_run_name(settings, process, tmp_path / "results" / "run1")
     process.process()
     run = app["session"].run_dir
     assert (run / "features" / "features_per_fov.csv").exists()

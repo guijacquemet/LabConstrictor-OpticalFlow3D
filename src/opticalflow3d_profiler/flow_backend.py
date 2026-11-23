@@ -149,7 +149,8 @@ def estimate_resources(
     return ResourceEstimate(
         peak_ram_bytes=voxels * (BYTES_PER_VOXEL_PEAK + params.window_length * itemsize),
         available_ram_bytes=available_memory(),
-        output_bytes=n_out * voxels * (3 * out_item + 4),
+        # vx, vy (and vz except per slice; 'auto' unresolved counts it) plus reliability
+        output_bytes=n_out * voxels * ((2 if params.mode == "xy_per_slice" else 3) * out_item + 4),
         free_disk_bytes=shutil.disk_usage(existing).free,
         n_outputs=n_out,
         seconds=n_out * voxels * SECONDS_PER_VOXEL,
