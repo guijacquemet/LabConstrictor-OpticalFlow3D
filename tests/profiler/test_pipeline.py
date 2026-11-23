@@ -403,3 +403,30 @@ def test_default_readout_is_a_feature_with_values(experiment):
     axial = FeatureDef(speed_3d, "magnitude", "", "", "lateral", "fov", "", AXIAL, "")
     undefined = replace_set(features, table=table, fov_defs=[axial, *features.fov_defs])
     assert default_readout(undefined) == SPEED
+
+
+def test_the_report_server_serves_only_files_inside_its_folder(tmp_path):
+    # Re-validation E24: no listing, no '..', no symbolic link out of the folder.
+    import urllib.error
+    import urllib.request
+
+    from opticalflow3d_profiler.report_link import serve
+
+    folder = tmp_path / "report"
+    folder.mkdir()
+    (folder / "report.html").write_text("<p>ok</p>")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("outside")
+    (folder / "link.txt").symlink_to(secret)
+    port = serve(folder)
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # never a proxy
+
+    def status(path):
+        try:
+            with direct.open(f"http://127.0.0.1:{port}{path}") as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    assert status("/report.html") == 200
+    assert {status(p) for p in ("/", "/link.txt", "/../secret.txt", "/%2e%2e/secret.txt")} == {404}

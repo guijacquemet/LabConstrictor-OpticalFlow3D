@@ -25,7 +25,16 @@ _SERVERS: dict[Path, int] = {}
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
-    """Serve the report's files only: no directory listing, no request log in the notebook."""
+    """Serve the report's files only: no directory listing, nothing outside the folder (a
+    symbolic link out of it included), no request log in the notebook."""
+
+    def send_head(self):  # noqa: ANN201 (stdlib signature)
+        """Refuse any path that resolves outside the served folder."""
+        root = Path(self.directory).resolve()
+        if not Path(self.translate_path(self.path)).resolve().is_relative_to(root):
+            self.send_error(404, "Outside the report folder")
+            return None
+        return super().send_head()
 
     def list_directory(self, path: str) -> None:
         """Refuse directory listings (only named files are served)."""
@@ -65,4 +74,9 @@ def show_link(report: Path, text: str = "Open the report in a new tab") -> None:
                 f'style="font-size:1.1em;font-weight:600">{html.escape(text)} ↗</a></p>'
             )
         )
-    print(f"Report file: {report}")
+    print(
+        f"Report file: {report}\n(On a remote Jupyter server the 127.0.0.1 link opens on your own "
+        "computer, not the server: open the file from the file browser instead.)"
+        if "google.colab" not in sys.modules
+        else f"Report file: {report}"
+    )
