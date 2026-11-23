@@ -110,3 +110,33 @@ def test_brightness_qc_column_and_warning(tmp_path):
         next((run / "flow").iterdir()).joinpath("flow_manifest.json").read_text()
     )
     assert "window_mean_intensity" in flow_manifest["outputs"][0]
+
+
+def test_histogram_matching_maps_each_frame_onto_the_central_histogram():
+    from opticalflow3d_profiler.brightness import match_histograms_window
+
+    rng = np.random.default_rng(0)
+    base = rng.gamma(2.0, 100.0, (3, 3, 20, 20))
+    window = np.stack([base[0] * 0.5, base[1], base[2] ** 1.2]).astype(np.uint16)
+    matched = match_histograms_window(window)
+    np.testing.assert_array_equal(matched[1], window[1])  # reference frame unchanged
+    q = [10, 50, 90]
+    for t in (0, 2):
+        assert np.percentile(matched[t], q) == pytest.approx(np.percentile(window[1], q), rel=0.05)
+        order = np.argsort(window[t], axis=None)
+        assert np.all(np.diff(matched[t].ravel()[order]) >= 0)  # monotonic mapping
+    assert window[0].max() < 2000  # input untouched
+
+
+def test_histogram_matching_also_removes_a_brightness_ramp():
+    movie = SyntheticMovie(shape=(7, 11, 80, 80), n_nuclei=12, brightness_ramp=0.08)
+    data = render(movie)
+    interior = nuclear_interior(movie, data[3])
+    raw, _ = flow_window(data, FlowParameters())
+    matched, record = flow_window(data, FlowParameters(brightness_equalisation="histogram_match"))
+    assert record["histogram_matched_to_frame"] == 3
+
+    def speed(f):
+        return np.median(np.sqrt(f["vx"] ** 2 + f["vy"] ** 2 + f["vz"] ** 2)[interior])
+
+    assert speed(matched) < 0.1 * speed(raw)

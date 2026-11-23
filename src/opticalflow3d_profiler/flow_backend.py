@@ -25,7 +25,12 @@ import tifffile
 
 from . import __version__
 from ._upstream import UPSTREAM_COMMIT, UPSTREAM_FILE_SHA256, UPSTREAM_REPOSITORY
-from .brightness import brightness_change, equalise_window, window_means
+from .brightness import (
+    brightness_change,
+    equalise_window,
+    match_histograms_window,
+    window_means,
+)
 from .config import FlowParameters, ImageSpec, to_record
 from .image_io import ImageHeader, dimensions, file_identity, read_frames, validate_image
 from .validation import InputError, check_time_and_depth, output_frame_map, raise_for_errors
@@ -259,6 +264,9 @@ def flow_window(window: np.ndarray, params: FlowParameters) -> tuple[dict, dict[
     }
     if params.brightness_equalisation == "global_mean":
         window, record["equalisation_factors"] = equalise_window(window, means)
+    elif params.brightness_equalisation == "histogram_match":
+        window = match_histograms_window(window)
+        record["histogram_matched_to_frame"] = len(means) // 2
     return compute_frame(window, params), record
 
 
