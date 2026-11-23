@@ -40,6 +40,7 @@ DEPENDENCIES = (
     "tqdm",
     "morphocoverage",
     "morphobricks-normalization",
+    "morphobricks-preprocessing",
     "umap-learn",
     "scikit-learn",
 )

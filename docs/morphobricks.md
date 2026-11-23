@@ -9,6 +9,7 @@ The profiler follows the MorphoBricks experiment folder layout and feature colum
 | Convention | Source | Commit | Profiler module |
 |---|---|---|---|
 | Folder layout, labels, `position_id` | morphobricks-preprocessing `docs/contract.md` §1, `discovery.py`, `image_names.py` | `7cfe8e4` (2026-11-22) | `discovery.py` |
+| Image headers: axes, shape, pixel type, physical sizes; experiment-wide header checks | morphobricks-preprocessing `inspect_tiff`, `header_axes`, `check_metadata(files, allow_z=True)` (contract §20), **imported** | `957158a` (2026-11-23) | `image_io.py`, `experiment_check.py` |
 | Feature column names | MorphoFeature `src/morphofeature/naming.py` (decision D09) | `7537a06` (2026-11-22) | `naming.py` |
 | Condition statistics and report | MorphoCoverage (`report`, `html_report`), **imported** | `209b9be` (2026-11-18) | `coverage.py` |
 | Brightness trend and corrections | morphobricks-normalization `time_series` (contract §3.7, plan N72), **imported** | `26112a5`, the v0.8.0 release commit (2026-11-23) | `brightness.py` (central frame of each flow window as the reference) |

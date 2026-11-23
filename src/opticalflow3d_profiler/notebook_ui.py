@@ -222,12 +222,12 @@ class LoadStep:
         axes = self.axes.value.strip().upper()
         spec = ImageSpec(self.session.header.path, axes, self.calibration())
         validate_image(spec, self.session.header)
-        table = check_headers(self.session.metadata, axes)
-        problems = header_problems(table)
+        table, issues = check_headers(self.session.metadata, axes)
+        problems = header_problems(table, issues)
         if problems:
             display(table[table["problem"] != ""])
             raise InputError("Some images cannot be processed: " + " | ".join(problems[:5]))
-        for note in header_notes(table):
+        for note in header_notes(table, issues):
             print("•", note)
         dims = dimensions(spec, self.session.header)
         self.session.spec = spec

@@ -8,9 +8,11 @@ sees a typical field of view rather than always the first one.
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
+from morphobricks_preprocessing import check_metadata
 
 from .config import ImageSpec
 from .image_io import ImageHeader, inspect_tiff, validate_image
@@ -55,16 +57,23 @@ def header_summary(header: ImageHeader, row: pd.Series | None = None) -> pd.Data
     return pd.DataFrame(rows, columns=["field", "value"])
 
 
-def check_headers(metadata: pd.DataFrame, axes: str) -> pd.DataFrame:
+def check_headers(metadata: pd.DataFrame, axes: str) -> tuple[pd.DataFrame, list]:
     """Check every image of the experiment against the confirmed axes (headers only).
+
+    Each image is checked with :func:`~opticalflow3d_profiler.image_io.validate_image`, and
+    all readable headers together with MorphoBricks preprocessing's experiment-wide header
+    checks, Z allowed (``check_metadata(files, allow_z=True)``, contract §20): unreadable
+    files, several series, pixel types, axis arrangement and channel counts are errors;
+    different sizes, plane counts and pixel sizes are warnings.
 
     Returns
     -------
-    pandas.DataFrame
-        One row per field of view: ``position``, ``shape``, ``pixel type``, the header
-        calibration and ``problem`` (empty when the image can be processed).
+    tuple
+        One row per field of view (``image``, ``shape``, ``pixel type``, the header
+        calibration and ``problem``, empty when the image can be processed), and the list of
+        preprocessing's ``ValidationIssue`` objects.
     """
-    rows = []
+    rows, headers = [], []
     for record in metadata.to_dict("records"):
         where = str(record.get("source_relative_path") or Path(record["image_path"]).name)
         row = {
@@ -76,6 +85,7 @@ def check_headers(metadata: pd.DataFrame, axes: str) -> pd.DataFrame:
         }
         try:
             header = inspect_tiff(Path(record["image_path"]))
+            headers.append(replace(header.metadata, relative_path=where))
             validate_image(ImageSpec(header.path, axes), header)
             cal = header.calibration_suggestion
             row.update(
@@ -87,30 +97,19 @@ def check_headers(metadata: pd.DataFrame, axes: str) -> pd.DataFrame:
         except InputError as error:
             row["problem"] = str(error)
         rows.append(row)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), check_metadata(headers, allow_z=True)
 
 
-def header_problems(table: pd.DataFrame) -> list[str]:
-    """Return the experiment-wide problems of :func:`check_headers` (empty when none).
-
-    Unreadable or invalid images and mixed pixel types are problems (MorphoBricks refuses
-    mixed types); different image sizes or header calibrations are reported as notes.
-    """
+def header_problems(table: pd.DataFrame, issues: list) -> list[str]:
+    """Return the experiment-wide problems: invalid images and preprocessing's errors."""
     problems = [f"{r.image}: {r.problem}" for r in table.itertuples() if r.problem]
-    readable = table[table["problem"] == ""]
-    if readable["pixel type"].nunique() > 1:
-        problems.append(
-            "Images have different pixel types: " + ", ".join(readable["pixel type"].unique())
-        )
-    return problems
+    return problems + [f"{i.code}: {i.message} {i.action}".strip() for i in issues if i.is_error]
 
 
-def header_notes(table: pd.DataFrame) -> list[str]:
-    """Return differences worth a look: image sizes and header calibrations."""
+def header_notes(table: pd.DataFrame, issues: list) -> list[str]:
+    """Return differences worth a look: preprocessing's warnings and header calibrations."""
     readable = table[table["problem"] == ""]
-    notes = []
-    if readable["shape"].nunique() > 1:
-        notes.append(f"{readable['shape'].nunique()} different image sizes.")
+    notes = [f"{i.code}: {i.message}" for i in issues if not i.is_error]
     if readable["header calibration"].nunique() > 1:
         notes.append(
             "Header calibrations differ between images; one confirmed calibration is used for "
