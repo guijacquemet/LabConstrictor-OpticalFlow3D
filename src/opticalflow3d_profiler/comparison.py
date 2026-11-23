@@ -35,58 +35,108 @@ CONFOUNDERS = (
 """QC columns compared alongside the readouts as potential confounders."""
 
 
+def repeat_column(table: pd.DataFrame) -> str:
+    """Return the column that identifies independent biological repeats.
+
+    ``repeat_id`` (written by :func:`~opticalflow3d_profiler.analysis.load_runs`, which
+    scopes labels to their run unless they are declared shared) takes precedence over the raw
+    ``biological_repeat`` label.
+    """
+    return "repeat_id" if "repeat_id" in table.columns else "biological_repeat"
+
+
 def replicate_means(table: pd.DataFrame, feature: str) -> pd.DataFrame:
     """Average a feature over the fields of view of each biological repeat.
 
     Parameters
     ----------
     table
-        Per-FOV table with ``condition`` and ``biological_repeat``.
+        Per-FOV table with ``condition`` and a repeat identity (:func:`repeat_column`).
     feature
         Column to average (NaN values are left out and counted).
 
     Returns
     -------
     pandas.DataFrame
-        ``condition``, ``biological_repeat``, ``value``, ``n_fovs``, ``n_fovs_missing``.
+        ``condition``, ``repeat``, ``value`` (NaN when every FOV is missing), ``n_fovs``
+        (defined values) and ``n_fovs_missing``.
     """
-    grouped = table.groupby(["condition", "biological_repeat"], sort=True)[feature]
+    values = pd.to_numeric(table[feature], errors="coerce")
+    keys = [table["condition"], table[repeat_column(table)].rename("repeat")]
+    grouped = values.groupby(keys, sort=True)
     out = pd.DataFrame(
         {
             "value": grouped.mean(),
             "n_fovs": grouped.count(),
-            "n_fovs_missing": grouped.apply(lambda s: int(s.isna().sum())),
+            "n_fovs_missing": grouped.apply(lambda v: int(v.isna().sum())),
         }
     )
     return out.reset_index()
 
 
-def hedges_g(a: np.ndarray, b: np.ndarray) -> float:
-    """Return Hedges' g (bias-corrected standardised mean difference, b minus a)."""
+def hedges_g(a: np.ndarray, b: np.ndarray) -> tuple[float, str]:
+    """Return Hedges' g (b minus a, bias corrected) and the reason when it is undefined."""
     n_a, n_b = a.size, b.size
     if n_a < 2 or n_b < 2:
-        return float("nan")
+        return float("nan"), "fewer than 2 repeats in a condition"
     pooled = np.sqrt(
         ((n_a - 1) * np.var(a, ddof=1) + (n_b - 1) * np.var(b, ddof=1)) / (n_a + n_b - 2)
     )
     if pooled == 0:
-        return float("nan")
+        return float("nan"), "no variation between repeats within either condition"
     correction = 1 - 3 / (4 * (n_a + n_b) - 9)
-    return float((np.mean(b) - np.mean(a)) / pooled * correction)
+    return float((np.mean(b) - np.mean(a)) / pooled * correction), ""
 
 
 def _paired_values(
     reps: pd.DataFrame, control: str, treatment: str
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Return values paired by biological repeat; raise when pairing is incomplete."""
-    wide = reps.pivot(index="biological_repeat", columns="condition", values="value")
-    incomplete = wide.index[wide[[control, treatment]].isna().any(axis=1)].tolist()
-    if incomplete:
+    """Return defined values paired by repeat, and the repeats left out for missing values.
+
+    Only the two compared conditions are considered.
+
+    Raises
+    ------
+    ValueError
+        When a repeat of one condition has no counterpart in the other.
+    """
+    two = reps[reps["condition"].isin([control, treatment])]
+    wide = two.pivot(index="repeat", columns="condition", values="value")
+    present = two.pivot(index="repeat", columns="condition", values="n_fovs_missing")
+    unmatched = present.index[present.reindex(columns=[control, treatment]).isna().any(axis=1)]
+    if len(unmatched):
         raise ValueError(
-            "Paired comparison refused: biological repeat(s) "
-            f"{', '.join(map(str, incomplete))} lack one of the two conditions."
+            "Paired comparison refused: repeat(s) "
+            f"{', '.join(map(str, unmatched))} lack one of the two conditions."
         )
-    return wide[control].to_numpy(), wide[treatment].to_numpy(), wide.index.tolist()
+    missing = wide.index[wide[[control, treatment]].isna().any(axis=1)].tolist()
+    wide = wide.drop(index=missing)
+    return wide[control].to_numpy(), wide[treatment].to_numpy(), [str(m) for m in missing]
+
+
+def _test(a: np.ndarray, b: np.ndarray, paired: bool) -> dict[str, object]:
+    """Run the design's t-test on repeat means, or say why it was not run or is degenerate."""
+    if min(a.size, b.size) < MIN_REPEATS_FOR_TEST:
+        return {
+            "test": "not run",
+            "p_value": np.nan,
+            "test_note": f"fewer than {MIN_REPEATS_FOR_TEST} biological repeats per condition",
+        }
+    if paired:
+        name, note = "paired t-test on repeat means", "assumes normal paired differences"
+        degenerate = np.ptp(b - a) == 0
+        result = None if degenerate else stats.ttest_rel(b, a)
+    else:
+        name, note = "Welch t-test on repeat means", "assumes approximately normal repeat means"
+        degenerate = np.ptp(a) == 0 or np.ptp(b) == 0
+        result = None if degenerate else stats.ttest_ind(b, a, equal_var=False)
+    if result is None or not np.isfinite(result.statistic) or not np.isfinite(result.pvalue):
+        return {
+            "test": f"{name}: not interpretable",
+            "p_value": np.nan,
+            "test_note": "zero variance between repeats (degenerate test)",
+        }
+    return {"test": name, "p_value": float(result.pvalue), "test_note": note}
 
 
 def compare(
@@ -103,26 +153,30 @@ def compare(
     control, treatment
         Condition names.
     paired
-        True only when biological repeats are explicitly matched across conditions
-        (the same ``biological_repeat`` label means the same paired experiment).
+        True only when biological repeats are explicitly matched across conditions (the
+        same repeat identity means the same paired experiment).
 
     Returns
     -------
     dict
-        Repeat counts, means, SDs, difference, Hedges' g (unpaired) and the test result
-        or the reason it was not run.
+        Repeat and FOV counts, repeats left out (all FOVs missing), means, SDs,
+        difference, Hedges' g with its undefined reason, and the test result or the reason
+        it was not run or is not interpretable.
 
     Raises
     ------
     ValueError
-        For an unknown condition, or a paired design with incomplete pairs.
+        For an unknown condition, or a paired design with unmatched repeats.
     """
-    reps = replicate_means(table, feature).dropna(subset=["value"])
     for name in (control, treatment):
         if name not in set(table["condition"]):
             raise ValueError(f"Condition '{name}' is not in the table.")
-    a = reps.loc[reps["condition"] == control, "value"].to_numpy()
-    b = reps.loc[reps["condition"] == treatment, "value"].to_numpy()
+    all_reps = replicate_means(table, feature)
+    reps = all_reps[all_reps["condition"].isin([control, treatment])]
+    dropped = reps[reps["value"].isna()]
+    defined = reps.dropna(subset=["value"])
+    a = defined.loc[defined["condition"] == control, "value"].to_numpy()
+    b = defined.loc[defined["condition"] == treatment, "value"].to_numpy()
     out: dict[str, object] = {
         "feature": feature,
         "control": control,
@@ -130,35 +184,31 @@ def compare(
         "design": "paired by biological repeat" if paired else "unpaired",
         "n_repeats_control": int(a.size),
         "n_repeats_treatment": int(b.size),
+        "n_fovs_used": int(defined["n_fovs"].sum()),
+        "n_fovs_missing": int(reps["n_fovs_missing"].sum()),
+        "repeats_excluded": "; ".join(
+            f"{r.condition}/{r.repeat}: all FOVs missing" for r in dropped.itertuples()
+        ),
         "mean_control": float(np.mean(a)) if a.size else np.nan,
         "mean_treatment": float(np.mean(b)) if b.size else np.nan,
         "sd_control": float(np.std(a, ddof=1)) if a.size > 1 else np.nan,
         "sd_treatment": float(np.std(b, ddof=1)) if b.size > 1 else np.nan,
     }
     out["difference"] = out["mean_treatment"] - out["mean_control"]
-    out["hedges_g"] = hedges_g(a, b)
+    out["hedges_g"], out["hedges_g_note"] = hedges_g(a, b)
     if paired:
-        a, b, _ = _paired_values(reps, control, treatment)
-    if min(a.size, b.size) < MIN_REPEATS_FOR_TEST:
-        out.update(
-            test="not run",
-            p_value=np.nan,
-            test_note=(f"fewer than {MIN_REPEATS_FOR_TEST} biological repeats per condition"),
-        )
-    elif paired:
-        result = stats.ttest_rel(b, a)
-        out.update(
-            test="paired t-test on repeat means",
-            p_value=float(result.pvalue),
-            test_note="assumes normally distributed paired differences",
-        )
-    else:
-        result = stats.ttest_ind(b, a, equal_var=False)
-        out.update(
-            test="Welch t-test on repeat means",
-            p_value=float(result.pvalue),
-            test_note="assumes approximately normal repeat means",
-        )
+        a, b, missing = _paired_values(reps, control, treatment)
+        if missing:
+            out["repeats_excluded"] = "; ".join(
+                filter(
+                    None,
+                    [
+                        out["repeats_excluded"],
+                        f"pairs left out (missing value): {', '.join(missing)}",
+                    ],
+                )
+            )
+    out.update(_test(a, b, paired))
     return out
 
 

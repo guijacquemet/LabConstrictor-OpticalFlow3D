@@ -27,7 +27,13 @@ from .foreground import MaskInfo, check_mask, describe, mask_frame, threshold_fr
 from .image_io import ImageHeader, dimensions, file_identity, inspect_tiff, read_frames
 from .results import environment, now, relative, write_csv, write_json
 from .temporal_features import aggregate_fov, fov_dictionary
-from .validation import InputError, check_calibration
+from .validation import (
+    InputError,
+    check_calibration,
+    check_feature_settings,
+    check_time_and_depth,
+    raise_for_errors,
+)
 
 LOG = logging.getLogger("opticalflow3d_profiler")
 FRAME_ID_COLUMNS = ("fov_uid", "output_index", "source_frame", "time_min")
@@ -227,6 +233,12 @@ def process_fov(
         )
         header = inspect_tiff(spec.path)
         warnings = calibration_warnings(header, settings.calibration)
+        dims = dimensions(spec, header)
+        warnings += [
+            i.message
+            for i in check_time_and_depth(dims["T"], dims["Z"], settings.flow)
+            if i.severity == "warning"
+        ]
         result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from)
         if flow_only:
             status.update(
@@ -236,7 +248,6 @@ def process_fov(
                 warnings=" | ".join(warnings),
             )
             return FovOutcome(status)
-        dims = dimensions(spec, header)
         fg_spec = settings.foreground
         if row.get("mask_path"):
             fg_spec = replace(fg_spec, mask_path=Path(row["mask_path"]))
@@ -358,6 +369,8 @@ def run_experiment(
             f"{run_dir} already holds features; create a new run that reuses "
             "its optical flow to extract features with other settings."
         )
+    if not flow_only:
+        raise_for_errors(check_feature_settings(settings.features, settings.foreground))
     handler = logging.FileHandler(run_dir / "logs" / "run.log", encoding="utf-8")
     LOG.addHandler(handler)
     LOG.setLevel(logging.INFO)

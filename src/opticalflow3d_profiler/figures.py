@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
+from .comparison import repeat_column
+
 CATEGORICAL = (
     "#2a78d6",
     "#eb6834",
@@ -94,7 +96,8 @@ def flow_overview(
         vx[sel][ok[sel]],
         vy[sel][ok[sel]],
         np.arctan2(vy[sel], vx[sel])[ok[sel]],
-        cmap="twilight",
+        cmap="hsv",  # cyclic and bright everywhere: readable on dark images
+        clim=(-np.pi, np.pi),  # fixed full circle: equal directions get equal colours
         angles="xy",
         pivot="mid",
     )
@@ -110,7 +113,7 @@ def flow_overview(
             pivot="mid",
             alpha=0.6,
         )
-    axes[0].set_title("Flow vectors (colour = direction, y down)")
+    axes[0].set_title("Flow vectors (colour = direction, −180° to 180°, y down)")
     speed = axes[1].imshow(np.hypot(vx, vy), cmap="Blues")
     fig.colorbar(speed, ax=axes[1], fraction=0.046, label="XY speed (px/frame)")
     axes[1].set_title("XY optical-flow speed")
@@ -138,8 +141,9 @@ def feature_histograms(table: pd.DataFrame, columns: list[str], units: str = "")
 def _scatter_groups(ax: plt.Axes, table: pd.DataFrame, x: str, y: str, size: float) -> None:
     """Scatter points coloured by condition and shaped by biological repeat."""
     colours = condition_colours(table["condition"].tolist())
-    repeats = sorted(table["biological_repeat"].unique())
-    for (condition, repeat), group in table.groupby(["condition", "biological_repeat"]):
+    column = repeat_column(table)
+    repeats = sorted(table[column].unique())
+    for (condition, repeat), group in table.groupby(["condition", column]):
         ax.scatter(
             group[x],
             group[y],
@@ -202,7 +206,8 @@ def condition_plot(table: pd.DataFrame, feature: str, label: str, unit: str = ""
     fig, ax = plt.subplots(figsize=(4.5, 4))
     conditions = sorted(table["condition"].unique())
     colours = condition_colours(conditions)
-    repeats = sorted(table["biological_repeat"].unique())
+    column = repeat_column(table)
+    repeats = sorted(table[column].unique())
     rng = np.random.default_rng(0)
     for i, condition in enumerate(conditions):
         sub = table[table["condition"] == condition]
@@ -215,7 +220,7 @@ def condition_plot(table: pd.DataFrame, feature: str, label: str, unit: str = ""
             alpha=0.45,
             linewidth=0,
         )
-        means = values.groupby(sub["biological_repeat"]).mean()
+        means = values.groupby(sub[column]).mean()
         for repeat, mean in means.items():
             ax.scatter(
                 i + 0.28,

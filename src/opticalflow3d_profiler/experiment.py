@@ -134,7 +134,9 @@ def replicate_counts(table: pd.DataFrame) -> pd.DataFrame:
     grouped = table.groupby("condition", sort=True)
     return pd.DataFrame(
         {
-            "biological_repeats": grouped["biological_repeat"].nunique(),
+            "biological_repeats": grouped[
+                "repeat_id" if "repeat_id" in table.columns else "biological_repeat"
+            ].nunique(),
             "fields_of_view": grouped["fov_uid"].nunique(),
         }
     ).reset_index()

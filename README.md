@@ -34,6 +34,27 @@ The installer downloads the Python packages during installation. After that, the
 Previously calculated upstream `process_flow` results can also be analysed. They are marked as
 unverified.
 
+## Check an installation with synthetic data
+
+The notebook's optional **synthetic demo** step, or `python tools/demo_synthetic.py <new folder>`,
+writes a synthetic experiment with a known answer:
+- `ctrl` nuclei move slowly in random directions;
+- `drug` nuclei move twice as fast, all in the same direction.
+
+It runs every step and checks the results against the ground truth. The checks cover the speed
+ratio, coherence, direction, axial drift and noise floor, PCA separation, recording of a failing
+file, and verified reuse of the optical flow.
+
+It keeps every intermediate file:
+- images and ground-truth masks;
+- optical-flow TIFFs and their manifests;
+- feature tables;
+- QC figures (`<run>/qc/`);
+- the PCA and comparison exports.
+
+`demo_report.md` lists each expectation as PASS or FAIL. In step 3, **Save QC figures** writes
+the same input, foreground and flow figures for your own data.
+
 ## Interpretation safeguards
 
 - Optical flow measures the motion of **intensity patterns**. It is not nuclear tracking, and it

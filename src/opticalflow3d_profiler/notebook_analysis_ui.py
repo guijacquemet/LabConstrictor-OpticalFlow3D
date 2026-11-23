@@ -173,6 +173,17 @@ class CompareStep:
             options=FAMILIES, value=FAMILIES, description="Feature families", style=STYLE
         )
         self.axial = widgets.Checkbox(description="Include experimental axial features")
+        self.selection = widgets.Dropdown(
+            options=[
+                ("core interpretable features (recommended)", "core"),
+                ("every feature of the chosen families", "families"),
+            ],
+            description="PCA inputs",
+            style=STYLE,
+        )
+        self.shared = widgets.Checkbox(
+            description="Repeat labels mean the same biological repeat in every run"
+        )
         self.missing = widgets.Dropdown(
             options=[
                 ("drop features with missing values", "drop_features"),
@@ -194,6 +205,8 @@ class CompareStep:
         return widgets.VBox(
             [
                 self.runs,
+                self.shared,
+                self.selection,
                 self.families,
                 self.axial,
                 self.missing,
@@ -210,7 +223,7 @@ class CompareStep:
         listed = [Path(p.strip()) for p in self.runs.value.splitlines() if p.strip()]
         if not listed and self.session.run_dir is None:
             raise InputError("List at least one run folder.")
-        features = load_runs(listed or [self.session.run_dir])
+        features = load_runs(listed or [self.session.run_dir], self.shared.value)
         conditions = sorted(features.table["condition"].unique())
         self.control.options = self.treatment.options = conditions
         self.session.analysis["features"] = features
@@ -219,7 +232,9 @@ class CompareStep:
     def pca(self) -> None:
         """Run and display the exploratory PCA."""
         features = self.features()
-        settings = PcaSettings(tuple(self.families.value), self.axial.value, self.missing.value)
+        settings = PcaSettings(
+            tuple(self.families.value), self.selection.value, self.axial.value, self.missing.value
+        )
         result = analyse(features, settings)
         self.session.analysis.update(pca=result, pca_settings=settings)
         display(replicate_counts(features.table))
