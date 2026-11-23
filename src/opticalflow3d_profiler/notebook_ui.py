@@ -20,7 +20,8 @@ from matplotlib.figure import Figure
 
 from . import figures
 from .config import Calibration, FlowParameters, ImageSpec
-from .experiment import read_metadata, validate_metadata
+from .discovery import position_id
+from .experiment import read_experiment_folder, read_metadata, validate_metadata
 from .flow_backend import estimate_resources
 from .flow_store import open_result
 from .image_io import ImageHeader, dimensions, inspect_tiff, read_frames, validate_image
@@ -36,14 +37,7 @@ from .validation import (
 
 WIDE = widgets.Layout(width="90%")
 STYLE = {"description_width": "180px"}
-METADATA_FIELDS = (
-    "sample_id",
-    "position_id",
-    "condition",
-    "biological_repeat",
-    "technical_repeat",
-    "batch",
-)
+METADATA_FIELDS = ("condition", "biological_repeat", "technical_repeat")
 
 
 @dataclass
@@ -268,8 +262,13 @@ class FlowStep:
         )
         self.parent = text("Results folder", placeholder="/path/to/results")
         self.run_name = text("Run name (optional)")
-        self.metadata_csv = text("Metadata CSV (batch)", placeholder="optional")
-        self.fields = {f: text(f, "unassigned") for f in METADATA_FIELDS}
+        self.experiment = text(
+            "Experiment folder", placeholder="MorphoBricks layout: condition/repeat/technical/"
+        )
+        self.masks = text("Masks folder (optional)", placeholder="outside the experiment")
+        self.mask_type = text("Mask type", placeholder="for example nuclei")
+        self.metadata_csv = text("or metadata CSV", placeholder="optional")
+        self.fields = {f: text(f, "single") for f in METADATA_FIELDS}
         self.output = widgets.Output()
         self.viewer = widgets.Output()
         self.fov = widgets.Dropdown(description="Field of view", style=STYLE, layout=WIDE)
@@ -289,7 +288,8 @@ class FlowStep:
         single = widgets.VBox(
             [
                 widgets.HTML(
-                    "<b>Single image</b>: experimental labels (never taken from the file name)"
+                    "<b>Single image</b>: its labels (MorphoBricks: <i>single</i> for a level "
+                    "the experiment does not have); position_id is the file name"
                 ),
                 *self.fields.values(),
             ]
@@ -307,6 +307,14 @@ class FlowStep:
                 ),
                 self.parent,
                 self.run_name,
+                widgets.HTML(
+                    "<b>Experiment folder</b> (MorphoBricks layout): "
+                    "&lt;root&gt;/&lt;condition&gt;/&lt;biological repeat&gt;/"
+                    "&lt;technical repeat&gt;/&lt;image&gt;.tif; every level is optional and a "
+                    "missing level is recorded as <i>single</i>."
+                ),
+                self.experiment,
+                widgets.HBox([self.masks, self.mask_type]),
                 self.metadata_csv,
                 single,
                 widgets.HBox([estimate, run]),
@@ -331,13 +339,21 @@ class FlowStep:
         )
 
     def metadata(self) -> pd.DataFrame:
-        """Return the metadata: from the CSV, or one row for the confirmed image."""
+        """Return the metadata: from the experiment folder, the CSV, or the confirmed image."""
+        if self.experiment.value.strip():
+            masks = self.masks.value.strip()
+            return read_experiment_folder(
+                Path(self.experiment.value.strip()),
+                Path(masks) if masks else None,
+                self.mask_type.value.strip() or None,
+            )
         if self.metadata_csv.value.strip():
             return read_metadata(Path(self.metadata_csv.value.strip()))
         if self.session.spec is None:
-            raise InputError("Confirm an image in step 1 or give a metadata CSV.")
-        row = {f: w.value for f, w in self.fields.items()}
-        row["input_path"] = self.session.spec.path.as_posix()
+            raise InputError("Confirm an image in step 1, or give an experiment folder or CSV.")
+        row = {f: w.value.strip() for f, w in self.fields.items()}
+        row["position_id"] = position_id(self.session.spec.path.name)
+        row["image_path"] = self.session.spec.path.as_posix()
         return validate_metadata(pd.DataFrame([row]))
 
     def estimate(self) -> None:
@@ -389,7 +405,7 @@ class FlowStep:
         flow = frame.load()
         self.z.max = flow["vx"].shape[0] - 1
         row = self.session.metadata.set_index("fov_uid").loc[self.fov.value]
-        spec = ImageSpec(Path(row["input_path"]), self.session.spec.axes, self.session.spec.channel)
+        spec = ImageSpec(Path(row["image_path"]), self.session.spec.axes, self.session.spec.channel)
         intensity = read_frames(spec, inspect_tiff(spec.path), [frame.source_frame])[0]
         print(f"Source time point {frame.source_frame}; velocities in pixels/frame.")
         show(figures.flow_overview(intensity, flow, self.z.value))

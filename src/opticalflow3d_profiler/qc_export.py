@@ -26,6 +26,7 @@ from .config import ImageSpec
 from .flow_features import reliability_mask
 from .flow_store import open_result
 from .image_io import dimensions, inspect_tiff, read_frames
+from .naming import find_column
 from .pipeline import RunSettings, foreground_reader
 from .validation import InputError
 
@@ -40,9 +41,13 @@ def flow_folder(run_dir: Path, status: dict[str, object]) -> Path:
     return Path(run_dir) / "flow" / str(status["fov_uid"])
 
 
-def _speed_column(frames: pd.DataFrame) -> str:
-    """Return the speed-median column of the run's speed mode."""
-    return "speed_3d_median" if "speed_3d_median" in frames.columns else "speed_xy_median"
+def _plotted(frames: pd.DataFrame) -> list[str]:
+    """Return the speed-median, coherence and reliable-fraction columns of a table."""
+    speed = find_column(frames.columns, "speed_3d_median") or find_column(
+        frames.columns, "speed_xy_median"
+    )
+    coherence = find_column(frames.columns, "coherence_xy_global")
+    return [c for c in (speed, coherence, "qc_reliable_fraction") if c in frames.columns]
 
 
 def export_fov(
@@ -68,7 +73,7 @@ def export_fov(
     """
     uid = str(status["fov_uid"])
     out = Path(run_dir) / "qc" / uid
-    spec = ImageSpec(Path(str(status["input_path"])), settings.axes, settings.channel)
+    spec = ImageSpec(Path(str(status["image_path"])), settings.axes, settings.channel)
     header = inspect_tiff(spec.path)
     dims = dimensions(spec, header)
     z = dims["Z"] // 2 if z is None else z
@@ -146,13 +151,13 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
     for status in done.to_dict("records"):
         written += export_fov(run_dir, status, settings, z)
         if frames is not None:
-            own = frames[frames["fov_uid"] == status["fov_uid"]].sort_values("source_frame")
+            own = frames[frames["fov_uid"] == status["fov_uid"]].sort_values("t")
             path = run_dir / "qc" / status["fov_uid"] / "features_over_time.png"
             figures.save(
                 figures.feature_timeseries(
                     own,
-                    [_speed_column(own), "coherence_xy_global", "qc_reliable_fraction"],
-                    "source_frame",
+                    _plotted(own),
+                    "t",
                 ),
                 path,
                 dpi=QC_DPI,
@@ -161,9 +166,7 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
     if frames is not None:
         path = run_dir / "qc" / "feature_histograms.png"
         figures.save(
-            figures.feature_histograms(
-                frames, [_speed_column(frames), "coherence_xy_global", "qc_reliable_fraction"]
-            ),
+            figures.feature_histograms(frames, _plotted(frames)),
             path,
             dpi=QC_DPI,
         )

@@ -14,10 +14,12 @@ from IPython.display import display
 
 from . import figures
 from .analysis import analyse, compare_conditions, export_analysis, load_runs
+from .comparison import ComparisonSettings
 from .config import FeatureSettings, ForegroundSpec
 from .demo import DemoDesign, run_demo
 from .experiment import replicate_counts
 from .external import external_features
+from .naming import feature_key
 from .notebook_ui import (
     METADATA_FIELDS,
     STYLE,
@@ -76,6 +78,8 @@ class FeatureStep:
         self.intensity = widgets.Checkbox(
             description="Also report intensity-based QC (opt-in)", style=STYLE
         )
+        self.channel_name = text("Channel name", placeholder="stain, for example H2B")
+        self.object_set = text("Foreground name", "Nuclei")
         self.new_run = text("New run name (re-extraction)", placeholder="optional")
         self.output = widgets.Output()
 
@@ -87,7 +91,14 @@ class FeatureStep:
         qc.on_click(guarded(self.output, self.save_qc))
         return widgets.VBox(
             [
+                widgets.HTML(
+                    "Feature columns are named as in MorphoBricks: "
+                    "<code>&lt;channel&gt;__&lt;foreground name or whole&gt;__&lt;feature&gt;"
+                    "</code>."
+                ),
+                self.channel_name,
                 self.fg_mode,
+                self.object_set,
                 self.threshold,
                 self.mask_path,
                 self.mask_axes,
@@ -109,8 +120,7 @@ class FeatureStep:
         session = self.session
         if session.run_dir is None or session.settings is None:
             raise InputError("Run step 2 first.")
-        features, foreground = self.settings()
-        settings = replace(session.settings, features=features, foreground=foreground)
+        settings = self.run_settings()
         written = export_qc_figures(session.run_dir, settings)
         print(f"{len(written)} QC figures saved in {session.run_dir / 'qc'}.")
 
@@ -135,13 +145,24 @@ class FeatureStep:
         )
         return features, foreground
 
+    def run_settings(self) -> RunSettings:
+        """Return the session's run settings with this step's choices."""
+        features, foreground = self.settings()
+        return replace(
+            self.session.settings,
+            features=features,
+            foreground=foreground,
+            channel_name=self.channel_name.value.strip() or None,
+            object_set=self.object_set.value.strip(),
+        )
+
     def extract(self) -> None:
         """Extract features for every field of view of the run (flow reused, verified)."""
         session = self.session
         if session.run_dir is None or session.settings is None:
             raise InputError("Run step 2 first.")
-        features, foreground = self.settings()
-        settings = replace(session.settings, features=features, foreground=foreground)
+        settings = self.run_settings()
+        features = settings.features
         run_dir = session.run_dir
         if self.new_run.value.strip():
             run_dir = create_run(run_dir.parent, self.new_run.value.strip())
@@ -156,11 +177,9 @@ class FeatureStep:
         if table.exists():
             frames = pd.read_csv(table)
             prefix = "speed_3d" if features.speed_mode == "xyz" else "speed_xy"
-            show(
-                figures.feature_histograms(
-                    frames, [f"{prefix}_median", "coherence_xy_global", "qc_reliable_fraction"]
-                )
-            )
+            names = settings.column_names()
+            keys = [f"{prefix}_median", "coherence_xy_global", "qc_reliable_fraction"]
+            show(figures.feature_histograms(frames, [names.column(k) for k in keys]))
 
 
 class CompareStep:
@@ -198,8 +217,7 @@ class CompareStep:
             style=STYLE,
         )
         self.control = widgets.Dropdown(description="Control", style=STYLE)
-        self.treatment = widgets.Dropdown(description="Treatment", style=STYLE)
-        self.paired = widgets.Checkbox(description="Repeats are paired across conditions")
+        self.seed = widgets.IntText(value=0, description="Random seed", style=STYLE)
         self.output = widgets.Output()
 
     def widget(self) -> widgets.Widget:
@@ -216,8 +234,13 @@ class CompareStep:
                 self.axial,
                 self.missing,
                 pca,
-                widgets.HBox([self.control, self.treatment]),
-                self.paired,
+                widgets.HTML(
+                    "<b>Compare every condition with the control</b> (MorphoCoverage rules; "
+                    "the field of view is the observation, the biological repeat the "
+                    "replicate): Cohen's d, the exploratory FOV-level randomization test, and "
+                    "the paired t-test on repeat means (from 3 repeats)."
+                ),
+                widgets.HBox([self.control, self.seed]),
                 compare,
                 self.output,
             ]
@@ -230,7 +253,7 @@ class CompareStep:
             raise InputError("List at least one run folder.")
         features = load_runs(listed or [self.session.run_dir], self.shared.value)
         conditions = sorted(features.table["condition"].unique())
-        self.control.options = self.treatment.options = conditions
+        self.control.options = conditions
         self.session.analysis["features"] = features
         return features
 
@@ -254,33 +277,46 @@ class CompareStep:
         show(figures.correlation_heatmap(result.prepared.matrix.corr()))
 
     def compare(self) -> None:
-        """Compare the two chosen conditions on the default readouts."""
+        """Compare every condition with the control on every tested feature."""
         features = self.session.analysis.get("features") or self.features()
-        if self.control.value == self.treatment.value:
-            raise InputError("Choose two different conditions.")
-        table = compare_conditions(
-            features, self.control.value, self.treatment.value, self.paired.value
+        settings = ComparisonSettings(self.control.value, self.axial.value, seed=self.seed.value)
+        tests, per_repeat = compare_conditions(features, settings)
+        self.session.analysis.update(comparison=(tests, per_repeat), comparison_settings=settings)
+        print(
+            "The FOV-level screen treats fields of view as independent: its passing features "
+            "are candidates. 'Significant across repeats' also needs the paired test on repeat "
+            "means (3 or more biological repeats)."
         )
-        self.session.analysis["comparison"] = table
-        display(
-            table[
-                [
-                    "role",
-                    "readout",
-                    "n_repeats_control",
-                    "n_repeats_treatment",
-                    "mean_control",
-                    "mean_treatment",
-                    "difference",
-                    "hedges_g",
-                    "test",
-                    "p_value",
-                ]
-            ]
-        )
-        for _, row in table[table["role"] == "readout"].iterrows():
-            unit = features.units["lateral"] if "speed" in row["feature"] else ""
-            show(figures.condition_plot(features.table, row["feature"], row["readout"], unit))
+        display(tests[[c for c in SUMMARY if c in tests.columns]])
+        for feature in plotted(tests):
+            unit = features.units["lateral"] if "speed" in feature else ""
+            show(figures.condition_plot(features.table, feature, feature_key(feature), unit))
+
+
+def plotted(tests: pd.DataFrame, most: int = 6) -> list[str]:
+    """Features to plot: those passing the screen, else the largest |d|, at most ``most``."""
+    rows = tests[tests["family"] == "features"].copy()
+    rows["size"] = rows["d_fovs"].abs()
+    passing = rows[rows["q_screen"] <= 0.05]
+    chosen = passing if len(passing) else rows
+    return list(dict.fromkeys(chosen.sort_values("size", ascending=False)["feature"]))[:most]
+
+
+SUMMARY = (
+    "family",
+    "feature",
+    "condition",
+    "fovs",
+    "control_fovs",
+    "repeats_paired",
+    "d_fovs",
+    "screen_test",
+    "q_screen",
+    "change",
+    "q_repeats",
+    "direction_per_repeat",
+    "verdict",
+)
 
 
 class ExportStep:
@@ -306,7 +342,14 @@ class ExportStep:
         if out.exists():
             raise InputError(f"{out} exists; choose another analysis name.")
         features, result = analysis["features"], analysis["pca"]
-        export_analysis(out, features, analysis["pca_settings"], result, analysis.get("comparison"))
+        export_analysis(
+            out,
+            features,
+            analysis["pca_settings"],
+            result,
+            analysis.get("comparison"),
+            analysis.get("comparison_settings"),
+        )
         figures.save(
             figures.pca_scatter(result.scores, result.explained_variance_ratio),
             out / "figures" / "pca_pc1_pc2.png",
@@ -318,10 +361,10 @@ class ExportStep:
         )
         comparison = analysis.get("comparison")
         if comparison is not None:
-            for _, row in comparison[comparison["role"] == "readout"].iterrows():
+            for feature in plotted(comparison[0]):
                 figures.save(
-                    figures.condition_plot(features.table, row["feature"], row["readout"]),
-                    out / "figures" / f"condition_{row['feature']}.png",
+                    figures.condition_plot(features.table, feature, feature_key(feature)),
+                    out / "figures" / f"condition_{feature}.png",
                 )
         print(
             f"Exported to {out}. Feature tables, the feature dictionary and the run "
@@ -336,7 +379,7 @@ class ExternalStep:
         self.session = session
         self.folder = text("Upstream result folder", placeholder=".../OpticalFlow3D/<name>")
         self.name = text("Upstream name (imNameSave)")
-        self.fields = {f: text(f, "unassigned") for f in METADATA_FIELDS}
+        self.fields = {f: text(f, "single") for f in (*METADATA_FIELDS, "position_id")}
         self.image = text("Original image (record only)", "unknown")
         self.parent = text("Results folder")
         self.run_name = text("Run name (optional)")
@@ -363,9 +406,17 @@ class ExternalStep:
         """Extract features from the upstream folder into a new run."""
         features, foreground = feature_step.settings()
         settings = RunSettings(
-            "", None, load_step.calibration(), features=features, foreground=foreground
+            "",
+            None,
+            load_step.calibration(),
+            features=features,
+            foreground=foreground,
+            channel_name=feature_step.channel_name.value.strip() or None,
+            object_set=feature_step.object_set.value.strip(),
         )
-        row = {f: w.value for f, w in self.fields.items()} | {"input_path": self.image.value}
+        row = {f: w.value.strip() for f, w in self.fields.items()} | {
+            "image_path": self.image.value
+        }
         run_dir = create_run(Path(self.parent.value.strip()), self.run_name.value.strip() or None)
         manifest = external_features(
             Path(self.folder.value.strip()), self.name.value.strip(), row, settings, run_dir

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from .comparison import compare_all
+from .comparison import ComparisonSettings
+from .comparison import compare_conditions as compare_tables
 from .config import to_record
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
@@ -163,7 +164,8 @@ def export_analysis(
     features: FeatureSet,
     settings: PcaSettings,
     result: PcaResult,
-    comparison: pd.DataFrame | None = None,
+    comparison: tuple[pd.DataFrame, pd.DataFrame] | None = None,
+    comparison_settings: ComparisonSettings | None = None,
 ) -> None:
     """Write scores, loadings, settings, matrix, exclusions and comparisons.
 
@@ -179,7 +181,9 @@ def export_analysis(
     result
         PCA result.
     comparison
-        Optional output of :func:`~opticalflow3d_profiler.comparison.compare_all`.
+        Optional ``(tests, per_repeat)`` from :func:`compare_conditions`.
+    comparison_settings
+        The settings of that comparison (recorded).
     """
     out_dir = Path(out_dir)
     prepared = result.prepared
@@ -192,7 +196,8 @@ def export_analysis(
         correlation_matrix(prepared).reset_index(names="feature"),
     )
     if comparison is not None:
-        write_csv(out_dir / "condition_comparison.csv", comparison)
+        write_csv(out_dir / "condition_tests.csv", comparison[0])
+        write_csv(out_dir / "condition_tests_per_repeat.csv", comparison[1])
     write_json(
         out_dir / "analysis_settings.json",
         {
@@ -208,12 +213,14 @@ def export_analysis(
             "excluded_fovs": prepared.excluded_fovs,
             "warnings": prepared.warnings,
             "standardisation": "z-score per feature (scikit-learn StandardScaler, ddof=0)",
+            "comparison_settings": to_record(comparison_settings) if comparison_settings else None,
+            "comparison_rules": "MorphoCoverage (docs/morphobricks.md): FOV as observation",
         },
     )
 
 
 def compare_conditions(
-    features: FeatureSet, control: str, treatment: str, paired: bool = False
-) -> pd.DataFrame:
-    """Compare two conditions on the default readouts and confounders."""
-    return compare_all(features.table, control, treatment, paired)
+    features: FeatureSet, settings: ComparisonSettings
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compare every condition with the control (MorphoCoverage rules, FOV as observation)."""
+    return compare_tables(features.table, features.fov_defs, settings)

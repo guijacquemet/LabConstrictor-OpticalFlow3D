@@ -9,10 +9,10 @@ from opticalflow3d_profiler.demo import DemoDesign, run_demo  # noqa: E402
 # Checks that hold at any size; the statistical ones need the full-size demo.
 STRUCTURAL = {
     "fields of view completed",
-    "missing file recorded as failed",
+    "unreadable TIFF recorded as failed",
     "optical-flow outputs per FOV (verified hashes)",
     "dominant direction drug",
-    "comparison at repeat level",
+    "comparison: FOVs and paired repeats",
     "mask run reuses verified flow",
 }
 
@@ -38,4 +38,5 @@ def test_demo_runs_and_keeps_intermediate_files(tmp_path):
     ):
         assert (run / name).exists(), name
     assert (tmp_path / "demo" / "demo_report.md").read_text().startswith("# Synthetic demo")
-    assert (tmp_path / "demo" / "masks").is_dir()
+    assert (tmp_path / "demo" / "masks" / "nuclei" / "drug" / "rep1" / "fov1.tif").is_file()
+    assert (run / "analysis" / "demo" / "condition_tests.csv").exists()

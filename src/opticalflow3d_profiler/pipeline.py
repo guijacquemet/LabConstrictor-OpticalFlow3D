@@ -26,6 +26,7 @@ from .flow_features import frame_features, velocity_scale
 from .flow_store import FlowResult, open_result, verify_result
 from .foreground import MaskInfo, check_mask, describe, mask_frame, threshold_frame
 from .image_io import ImageHeader, dimensions, file_identity, inspect_tiff, read_frames
+from .naming import ColumnNames
 from .results import environment, now, relative, write_csv, write_json
 from .temporal_features import aggregate_fov, fov_dictionary
 from .validation import (
@@ -38,7 +39,7 @@ from .validation import (
 )
 
 LOG = logging.getLogger("opticalflow3d_profiler")
-FRAME_ID_COLUMNS = ("fov_uid", "output_index", "source_frame", "time_min")
+FRAME_ID_COLUMNS = ("fov_uid", "output_index", "t", "time_min")
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,12 @@ class RunSettings:
     flow, features, foreground
         Upstream parameters, feature settings and foreground definition. With a
         ``mask_path`` column in the metadata, each field of view uses its own mask.
+    channel_name
+        The analysed channel's name, the first token of every feature column (MorphoBricks
+        naming, :mod:`~opticalflow3d_profiler.naming`); required to extract features.
+    object_set
+        The foreground's object-set token (with a threshold or masks); without foreground
+        the token is ``whole``.
     """
 
     axes: str
@@ -62,6 +69,12 @@ class RunSettings:
     flow: FlowParameters = field(default_factory=FlowParameters)
     features: FeatureSettings = field(default_factory=FeatureSettings)
     foreground: ForegroundSpec = field(default_factory=ForegroundSpec)
+    channel_name: str | None = None
+    object_set: str = "Foreground"
+
+    def column_names(self) -> ColumnNames:
+        """Return the checked tokens of this run's feature columns."""
+        return ColumnNames.of(self.channel_name, self.object_set, self.foreground.mode != "none")
 
 
 @dataclass
@@ -175,7 +188,7 @@ def frame_rows(
         row: dict[str, object] = {
             "fov_uid": result.name,
             "output_index": index,
-            "source_frame": t,
+            "t": t,
             "time_min": t * dt if dt else None,
         }
         row.update(features.values)
@@ -257,7 +270,7 @@ def process_fov(
     }
     try:
         spec = ImageSpec(
-            Path(row["input_path"]), settings.axes, settings.channel, settings.calibration
+            Path(row["image_path"]), settings.axes, settings.channel, settings.calibration
         )
         header = inspect_tiff(spec.path)
         warnings = calibration_warnings(header, settings.calibration)
@@ -309,13 +322,8 @@ def fov_table(frame_table: pd.DataFrame, settings: RunSettings) -> pd.DataFrame:
     defs = frame_dictionary(settings.features.speed_mode, settings.features.intensity_features)
     rows = []
     for uid, group in frame_table.groupby("fov_uid", sort=True):
-        group = group.sort_values("source_frame")
-        values, undefined = aggregate_fov(
-            group.to_dict("records"),
-            group["source_frame"].tolist(),
-            defs,
-            settings.calibration.frame_interval,
-        )
+        group = group.sort_values("t")
+        values, undefined = aggregate_fov(group.to_dict("records"), defs)
         rows.append(
             {
                 "fov_uid": uid,
@@ -326,10 +334,30 @@ def fov_table(frame_table: pd.DataFrame, settings: RunSettings) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def rename_features(table: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
+    """Rename feature columns and the names in ``undefined_features`` notes."""
+    out = table.rename(columns=mapping)
+    if "undefined_features" in out.columns:
+        out["undefined_features"] = [
+            "; ".join(
+                f"{mapping.get(k, k)}:{v}"
+                for k, _, v in (p.partition(":") for p in str(n).split("; "))
+            )
+            if isinstance(n, str) and n
+            else n
+            for n in out["undefined_features"]
+        ]
+    return out
+
+
 def write_feature_tables(
     run_dir: Path, metadata: pd.DataFrame, frame_table: pd.DataFrame, settings: RunSettings
 ) -> pd.DataFrame:
-    """Write the frame and FOV feature tables and the feature dictionary.
+    """Write the full per-frame table, the per-FOV time averages and the feature dictionary.
+
+    Feature columns are renamed to the MorphoBricks scheme
+    ``{channel}__{object_set}__{feature}``; ``qc_*`` columns keep their names (metadata).
+    Undefined-feature notes name the columns too.
 
     Returns
     -------
@@ -338,10 +366,13 @@ def write_feature_tables(
     """
     defs = frame_dictionary(settings.features.speed_mode, settings.features.intensity_features)
     time_unit = "min" if settings.calibration.frame_interval else "frame"
-    per_fov = fov_table(frame_table, settings)
+    names = settings.column_names()
+    mapping = names.mapping(d.name for d in defs)
+    per_fov = rename_features(fov_table(frame_table, settings), mapping)
     meta = metadata[[c for c in METADATA_COLUMNS if c in metadata.columns]]
     per_fov = meta.merge(per_fov, on="fov_uid", how="inner")
-    per_frame = meta.merge(frame_table, on="fov_uid", how="inner")
+    per_frame = meta.merge(rename_features(frame_table, mapping), on="fov_uid", how="inner")
+    defs = [replace(d, name=mapping[d.name]) for d in defs]
     write_csv(run_dir / "features" / "features_per_frame.csv", per_frame)
     write_csv(run_dir / "features" / "features_per_fov.csv", per_fov)
     scale = velocity_scale(settings.calibration)
@@ -349,10 +380,15 @@ def write_feature_tables(
         run_dir / "features" / "feature_dictionary.json",
         {
             "units": {"lateral": scale.lateral_unit, "axial": scale.axial_unit, "time": time_unit},
+            "column_naming": {
+                "scheme": "MorphoBricks {channel}__{object_set}__{feature}; qc_* unprefixed",
+                "channel": names.channel,
+                "object_set": names.object_set,
+            },
             "metadata_columns": list(meta.columns),
             "frame_identifier_columns": list(FRAME_ID_COLUMNS),
             "frame_features": dictionary_records(defs),
-            "fov_features": dictionary_records(fov_dictionary(defs, time_unit)),
+            "fov_features": dictionary_records(fov_dictionary(defs)),
         },
     )
     return per_fov
@@ -405,6 +441,7 @@ def run_experiment(
     settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
         raise_for_errors(check_feature_settings(settings.features, settings.foreground))
+        settings.column_names()
         if settings.flow.mode == "xy_per_slice" and settings.features.speed_mode == "xyz":
             raise InputError(
                 "3D speed needs 3D optical flow; with per-slice 2D flow choose XY speed."

@@ -31,7 +31,7 @@ def external_features(
     folder, name
         Upstream output folder and its ``imNameSave`` prefix.
     metadata_row
-        The experimental metadata of this field of view (``input_path`` may name the
+        The experimental metadata of this field of view (``image_path`` may name the
         original image for the record; it is not read).
     settings
         Run settings (``axes`` and ``channel`` are recorded but not used).

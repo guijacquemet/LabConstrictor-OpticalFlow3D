@@ -1,9 +1,11 @@
-"""Experimental metadata: conditions, replicates and stable field-of-view identities (pure).
+"""Experimental metadata: conditions, replicates and stable field-of-view identities.
 
-Conditions, biological and technical repeats come only from the metadata table, never
-from file names. Each field of view gets a deterministic, collision-safe ``fov_uid``
-built from all its identifying columns, so two conditions or repeats may reuse the same
-``position_id``.
+A field of view is identified as in every MorphoBricks table by ``condition``,
+``biological_repeat``, ``technical_repeat`` and ``position_id``. The table comes either from
+a MorphoBricks experiment folder (:func:`~opticalflow3d_profiler.discovery.discover_experiment`,
+labels from the folder names) or from a metadata CSV with the same columns and
+``image_path``; labels are never parsed from file names. Each field of view also gets a
+deterministic, collision-safe ``fov_uid`` (its folder name in the run).
 """
 
 from __future__ import annotations
@@ -14,25 +16,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from .discovery import FOV_KEY, check_identity_text, discover_experiment
 from .validation import InputError
 
-REQUIRED_COLUMNS = (
-    "sample_id",
-    "position_id",
-    "condition",
-    "biological_repeat",
-    "technical_repeat",
-    "batch",
-    "input_path",
-)
-OPTIONAL_COLUMNS = ("mask_path",)
-IDENTITY_COLUMNS = (
-    "condition",
-    "biological_repeat",
-    "technical_repeat",
-    "sample_id",
-    "position_id",
-)
+IDENTITY_COLUMNS = FOV_KEY
+REQUIRED_COLUMNS = (*FOV_KEY, "image_path")
+OPTIONAL_COLUMNS = ("mask_path", "source_relative_path")
 METADATA_COLUMNS = ("fov_uid", *REQUIRED_COLUMNS, *OPTIONAL_COLUMNS)
 
 
@@ -84,17 +73,20 @@ def validate_metadata(table: pd.DataFrame) -> pd.DataFrame:
         if empty.any():
             rows = ", ".join(str(i + 2) for i in table.index[empty])
             raise InputError(f"Column '{column}' is empty in line(s) {rows} of the table.")
+    for column in IDENTITY_COLUMNS:
+        for value in table[column]:
+            check_identity_text(str(value), column, "metadata table")
     duplicated = table.duplicated(list(IDENTITY_COLUMNS), keep=False)
     if duplicated.any():
         raise InputError(
-            "Several rows have the same condition, repeats, sample and position: "
-            + ", ".join(table.loc[duplicated, "sample_id"].unique())
+            "Several rows have the same condition, repeats and position: "
+            + ", ".join(table.loc[duplicated, "position_id"].unique())
         )
-    paths = table["input_path"].duplicated(keep=False)
+    paths = table["image_path"].duplicated(keep=False)
     if paths.any():
         raise InputError(
-            "The same input file is listed more than once: "
-            + ", ".join(table.loc[paths, "input_path"].unique())
+            "The same image file is listed more than once: "
+            + ", ".join(table.loc[paths, "image_path"].unique())
         )
     table.insert(0, "fov_uid", [fov_uid(r) for r in table.to_dict("records")])
     if table["fov_uid"].duplicated().any():  # only possible with a hash collision
@@ -106,7 +98,7 @@ def validate_metadata(table: pd.DataFrame) -> pd.DataFrame:
 def read_metadata(path: Path) -> pd.DataFrame:
     """Read and validate a metadata CSV (all values read as text).
 
-    Relative ``input_path`` and ``mask_path`` values are resolved against the CSV's folder.
+    Relative ``image_path`` and ``mask_path`` values are resolved against the CSV's folder.
 
     Parameters
     ----------
@@ -119,14 +111,26 @@ def read_metadata(path: Path) -> pd.DataFrame:
         Validated table (see :func:`validate_metadata`).
     """
     table = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if "input_path" in table.columns and "image_path" not in table.columns:
+        raise InputError("Rename the column 'input_path' to 'image_path' (MorphoBricks name).")
     base = Path(path).resolve().parent
-    for column in ("input_path", "mask_path"):
+    for column in ("image_path", "mask_path"):
         if column in table.columns:
             table[column] = [
                 (base / v).as_posix() if v.strip() and not Path(v).is_absolute() else v
                 for v in table[column]
             ]
     return validate_metadata(table)
+
+
+def read_experiment_folder(
+    root: Path, masks: Path | None = None, mask_type: str | None = None
+) -> pd.DataFrame:
+    """Discover a MorphoBricks experiment folder and validate it as a metadata table.
+
+    See :func:`~opticalflow3d_profiler.discovery.discover_experiment` for the layout rules.
+    """
+    return validate_metadata(discover_experiment(root, masks, mask_type))
 
 
 def replicate_counts(table: pd.DataFrame) -> pd.DataFrame:

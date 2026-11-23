@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import matplotlib
-import pandas as pd
 import pytest
 import tifffile
 
@@ -61,26 +60,16 @@ def test_all_steps_drive_end_to_end(tmp_path):
     for i, (condition, rep, speed) in enumerate(
         [("ctrl", "r1", 0.2), ("ctrl", "r2", 0.25), ("drug", "r1", 0.6), ("drug", "r2", 0.7)]
     ):
-        path = tmp_path / f"{condition}_{rep}.tif"
+        path = tmp_path / "experiment" / condition / rep / "p1.tif"  # MorphoBricks layout
+        path.parent.mkdir(parents=True)
         write_movie(path, speed, i)
-        rows.append(
-            {
-                "sample_id": f"s{i}",
-                "position_id": "p1",
-                "condition": condition,
-                "biological_repeat": rep,
-                "technical_repeat": "t1",
-                "batch": "b1",
-                "input_path": path.name,
-            }
-        )
-    pd.DataFrame(rows).to_csv(tmp_path / "metadata.csv", index=False)
+        rows.append(path)
     app = build()
     for step in ("load", "flow", "features", "compare", "export"):
         app[step].widget()
 
     load = app["load"]
-    load.path.value = str(tmp_path / "ctrl_r1.tif")
+    load.path.value = str(rows[0])
     load.inspect()
     assert load.axes.value == "TZYX" and load.cal["x"].value == "0.65"
     assert load.cal["t"].value == ""  # no frame interval in the header: left empty
@@ -91,7 +80,7 @@ def test_all_steps_drive_end_to_end(tmp_path):
 
     flow = app["flow"]
     flow.parent.value = str(tmp_path / "results")
-    flow.metadata_csv.value = str(tmp_path / "metadata.csv")
+    flow.experiment.value = str(tmp_path / "experiment")
     flow.estimate()
     flow.run()
     assert len(flow.fov.options) == 4
@@ -99,6 +88,7 @@ def test_all_steps_drive_end_to_end(tmp_path):
     flow.show()
 
     features = app["features"]
+    features.channel_name.value = "H2B"
     features.fg_mode.value = "threshold"
     features.threshold.value = "300"
     features.rel_value.value = "0.001"
@@ -109,12 +99,12 @@ def test_all_steps_drive_end_to_end(tmp_path):
 
     compare = app["compare"]
     compare.pca()
-    compare.control.value, compare.treatment.value = "ctrl", "drug"
+    compare.control.value = "ctrl"
     compare.compare()
     export = app["export"]
     export.export()
     out = run / "analysis" / "analysis-1"
-    assert (out / "pca_scores.csv").exists() and (out / "condition_comparison.csv").exists()
+    assert (out / "pca_scores.csv").exists() and (out / "condition_tests.csv").exists()
     assert (out / "figures" / "pca_pc1_pc2.png").exists()
     with pytest.raises(Exception, match="exists"):
         export.export()

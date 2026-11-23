@@ -6,9 +6,9 @@ Guidance for AI agents and people changing this repository.
 
 - `src/opticalflow3d_profiler/`: the package. One job per module:
   - **pure:** `config`, `validation`, `flow_features`, `feature_dictionary`, `temporal_features`,
-    `experiment`, `profile_analysis`, `comparison`, `synthetic`;
-  - **I/O:** `image_io`, `flow_backend`, `flow_store`, `foreground`, `results`, `analysis`,
-    `figures`;
+    `experiment`, `naming`, `statistics`, `profile_analysis`, `comparison`, `synthetic`;
+  - **I/O:** `image_io`, `discovery`, `flow_backend`, `flow_store`, `foreground`, `results`,
+    `analysis`, `figures`;
   - **orchestration:** `pipeline`, `external`;
   - **UI:** `notebook_ui`, `notebook_analysis_ui`.
 - `src/opticalflow3d_profiler/_upstream/calc_flow.py`: an **unchanged** copy of OpticalFlow3D at
@@ -19,6 +19,10 @@ Guidance for AI agents and people changing this repository.
   (exact pins). The template merges these pins into `requirements.txt`. The cells only call
   `notebook_analysis_ui.build()`.
 - `tests/profiler/`, `tools/check_profiler.py`, `tools/benchmark_flow.py`, `docs/validation.md`.
+- MorphoBricks conventions (folder layout, column names, MorphoCoverage statistics) are
+  reimplemented, never imported; `docs/morphobricks.md` records the source commits. Keep the
+  FOV identity (`condition`, `biological_repeat`, `technical_repeat`, `position_id`), the
+  `{channel}__{object_set}__{feature}` names and the field of view as the observation.
 - Everything else (`.tools`, `.github/workflows` except `profiler_checks.yml`, `app/`,
   `construct.yaml`) belongs to the LabConstrictor template. Do not edit it by hand, except
   the app images: `app/logo/` is drawn by `tools/draw_icon.py` and referenced by the image keys

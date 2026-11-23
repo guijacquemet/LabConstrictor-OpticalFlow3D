@@ -65,7 +65,8 @@ the same input, foreground and flow figures for your own data.
   occupancy and reliability.
 - Z-dependent features are **experimental** and are excluded from the PCA unless you choose them.
 - Fields of view from one biological repeat are not independent. A PCA separation is not evidence
-  that a treatment changes migration.
+  that a treatment changes migration. The FOV-level randomization test is exploratory; only the
+  paired test on repeat means (3 or more biological repeats) says whether an effect repeats.
 
 ## Resources
 
@@ -80,13 +81,19 @@ processing (measured on a 4-vCPU machine), and 9.4 GB of float64 output per fiel
 <run>/experiments.csv     validated metadata with fov_uid
 <run>/fovs.csv            status of every field of view (failures included)
 <run>/flow/<fov_uid>/     <fov_uid>_{vx,vy,vz,rel}_tNNNN.tiff + flow_manifest.json
-<run>/features/           features_per_frame.csv, features_per_fov.csv, feature_dictionary.json
-<run>/analysis/<name>/    pca_*.csv, condition_comparison.csv, analysis_settings.json, figures/
+<run>/features/           features_per_frame.csv (every time point t), features_per_fov.csv
+                          (time averages), feature_dictionary.json
+<run>/analysis/<name>/    pca_*.csv, condition_tests.csv, condition_tests_per_repeat.csv,
+                          analysis_settings.json, figures/
 <run>/logs/run.log
 ```
 
-Metadata CSV columns: `sample_id, position_id, condition, biological_repeat, technical_repeat,
-batch, input_path` (optional `mask_path`). Relative paths are resolved from the CSV's folder.
+Input: a MorphoBricks experiment folder, `<root>/<condition>/<biological repeat>/<technical
+repeat>/<image>.tif`. Every level is optional, and a missing level is recorded as `single`.
+Masks go in a separate masks folder. A metadata CSV with `condition, biological_repeat,
+technical_repeat, position_id, image_path` (optional `mask_path`) also works. Feature columns
+are named `<channel>__<foreground or whole>__<feature>`. The comparison follows the MorphoCoverage
+rules, with the field of view as the observation. See [docs/morphobricks.md](docs/morphobricks.md).
 
 ## Development
 

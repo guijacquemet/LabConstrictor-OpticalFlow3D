@@ -18,29 +18,28 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 from .feature_dictionary import FeatureDef
+from .naming import feature_key
 from .temporal_features import pca_eligible
 
 MissingPolicy = Literal["drop_features", "drop_fovs"]
 Selection = Literal["core", "families"]
 CORE_FEATURES = (
-    "speed_xy_median__tmean",
-    "speed_xy_p90__tmean",
-    "speed_xy_cv__tmean",
-    "speed_xy_median__tsd",
-    "coherence_xy_global__tmean",
-    "coherence_xy_global__tsd",
-    "coherence_xy_local__tmean",
-    "xy_angular_dispersion__tmean",
-    "xy_angular_entropy__tmean",
-    "xy_aligned_fraction__tmean",
-    "regional_speed_cv__tmean",
-    "regional_coherence_sd__tmean",
+    "speed_xy_median",
+    "speed_xy_p90",
+    "speed_xy_cv",
+    "coherence_xy_global",
+    "coherence_xy_local",
+    "xy_angular_dispersion",
+    "xy_angular_entropy",
+    "xy_aligned_fraction",
+    "regional_speed_cv",
+    "regional_coherence_sd",
 )
 """Default PCA inputs: one column per interpretable property (amplitude, upper tail,
 heterogeneity, temporal variation, collective motion, spatial heterogeneity), instead of
 many strongly correlated representations of the same one. ``speed_xy`` becomes
 ``speed_3d`` in XYZ mode."""
-CORE_AXIAL = ("vz_abs_mean__tmean", "axial_lateral_ratio__tmean", "coherence_3d_global__tmean")
+CORE_AXIAL = ("vz_abs_mean", "axial_lateral_ratio", "coherence_3d_global")
 MIN_REPEATS_PER_CONDITION = 3
 
 
@@ -123,7 +122,7 @@ def select_inputs(
             excluded.append({"feature": d.name, "reason": f"applicability {d.applicability}"})
         elif d.family not in settings.families:
             excluded.append({"feature": d.name, "reason": f"family {d.family} not selected"})
-        elif settings.selection == "core" and d.name not in core:
+        elif settings.selection == "core" and feature_key(d.name) not in core:
             excluded.append({"feature": d.name, "reason": "not in the core feature set"})
         else:
             selected.append(d.name)

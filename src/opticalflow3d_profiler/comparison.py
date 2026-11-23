@@ -1,255 +1,390 @@
-"""Compare conditions on a few interpretable readouts (pure).
+"""Compare every condition with a declared control, following MorphoCoverage's rules (pure).
 
-Fields of view are first averaged within each biological repeat; the condition effect is
-estimated between repeats, never between fields of view. A test is run only when the
-design supports it (at least 3 repeats per condition; pairing only when declared and
-complete). The output always carries the effect size and variability, whether or not a
-test is run.
+The observation is the field of view (its time-averaged profile, ``features_per_fov.csv``);
+the biological repeat is the replicate. Each condition is compared with the control on every
+selected feature, with MorphoCoverage's three answers (``docs/report/conditions.md``), on raw
+and on normalised values (each value divided by the mean of the control of its own
+biological repeat):
+
+1. **Cohen's d** on the fields of view, pooled and per repeat (effect sizes, not tests);
+2. **the FOV-level randomization test** on Cohen's d (labels shuffled over the fields of
+   view), as provided and, when the repeats are unbalanced, the balanced permutation test.
+   It is **exploratory**: it treats fields of view as independent, so when the effect varies
+   between repeats it gives ``p <= 0.05`` without an effect more often than 5%
+   (``chance_low``/``chance_high`` give that rate for 0.25-0.5 SD between repeats). Its
+   passing features are candidates;
+3. **the paired t-test on the repeat means** (log ratios when every observation of the
+   feature is positive, else differences), from 3 biological repeats holding both the
+   condition and the control; the exact sign-flip test is added from 6 repeats.
+
+Benjamini-Hochberg q-values are computed per p column over every feature and condition (one
+family per control); quality-control columns form their own family. Tests at ``p <= 0.05``
+are rerun with enough shuffles that the smallest q can fall below 0.05, seeded from the
+test's identity. A feature is *significant across repeats* when it passes the exploratory
+screen (``q_screen <= 0.05``) and the paired test (``q_repeats <= 0.05``).
+
+Fields of view are never averaged per biological repeat in a saved table: repeat means exist
+only inside the paired test (and its per-repeat table), as MorphoCoverage computes them.
 """
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
-from scipy import stats
 
-MIN_REPEATS_FOR_TEST = 3
+from . import statistics as st
+from .feature_dictionary import QC, FeatureDef
+from .temporal_features import pca_eligible
 
-READOUTS = {
-    "median motion magnitude": "speed_xy_median__tmean",
-    "upper-tail motion magnitude": "speed_xy_p90__tmean",
-    "directional coherence": "coherence_xy_global__tmean",
-    "spatial heterogeneity": "regional_speed_cv__tmean",
-    "temporal variation": "speed_xy_median__tsd",
-}
-"""Default readouts (XY speed mode); ``speed_3d`` replaces ``speed_xy`` in XYZ mode."""
-
+IMBALANCE = 1.25
+SPARSE = 0.25
+MIN_BALANCED = 5
+P_COLUMNS = ("p_fovs", "p_fovs_normalised", "p_balanced", "p_balanced_normalised", "p_repeats")
 CONFOUNDERS = (
-    "qc_foreground_intensity_mean__tmean",
-    "qc_foreground_fraction__tmean",
-    "qc_object_mean_voxels__tmean",
-    "qc_object_mean_z_extent__tmean",
-    "qc_reliable_fraction__tmean",
-    "qc_reliability_threshold__tmean",
-    "qc_brightness_change_per_frame__tmean",
+    "qc_foreground_intensity_mean",
+    "qc_foreground_fraction",
+    "qc_object_mean_voxels",
+    "qc_object_mean_z_extent",
+    "qc_reliable_fraction",
+    "qc_reliability_threshold",
+    "qc_brightness_change_per_frame",
 )
-"""QC columns compared alongside the readouts as potential confounders."""
+"""QC columns compared alongside the features (their own family) as potential confounders."""
+
+
+@dataclass(frozen=True)
+class ComparisonSettings:
+    """Choices of the comparison.
+
+    Attributes
+    ----------
+    control
+        The control condition every other condition is compared with.
+    include_axial
+        Also test experimental axial (Z-dependent) features.
+    permutations
+        Shuffles of the FOV-level randomization test (MorphoCoverage's screen: 9999).
+    balanced_permutations
+        Labellings of the balanced test (999).
+    seed
+        Seed of every shuffle (each test seeded from it and its identity).
+    """
+
+    control: str
+    include_axial: bool = False
+    permutations: int = 9999
+    balanced_permutations: int = 999
+    seed: int = 0
 
 
 def repeat_column(table: pd.DataFrame) -> str:
-    """Return the column that identifies independent biological repeats.
-
-    ``repeat_id`` (written by :func:`~opticalflow3d_profiler.analysis.load_runs`, which
-    scopes labels to their run unless they are declared shared) takes precedence over the raw
-    ``biological_repeat`` label.
-    """
+    """Return the column identifying biological repeats (``repeat_id`` when present)."""
     return "repeat_id" if "repeat_id" in table.columns else "biological_repeat"
 
 
-def replicate_means(table: pd.DataFrame, feature: str) -> pd.DataFrame:
-    """Average a feature over the fields of view of each biological repeat.
-
-    Parameters
-    ----------
-    table
-        Per-FOV table with ``condition`` and a repeat identity (:func:`repeat_column`).
-    feature
-        Column to average (NaN values are left out and counted).
-
-    Returns
-    -------
-    pandas.DataFrame
-        ``condition``, ``repeat``, ``value`` (NaN when every FOV is missing), ``n_fovs``
-        (defined values) and ``n_fovs_missing``.
-    """
-    values = pd.to_numeric(table[feature], errors="coerce")
-    keys = [table["condition"], table[repeat_column(table)].rename("repeat")]
-    grouped = values.groupby(keys, sort=True)
-    out = pd.DataFrame(
-        {
-            "value": grouped.mean(),
-            "n_fovs": grouped.count(),
-            "n_fovs_missing": grouped.apply(lambda v: int(v.isna().sum())),
-        }
-    )
-    return out.reset_index()
+def _rng(settings: ComparisonSettings, *identity: object) -> np.random.Generator:
+    """Return a generator seeded from the settings' seed and a test's identity (order-free)."""
+    digest = hashlib.sha256("\x1f".join(map(str, identity)).encode("utf-8")).digest()
+    return np.random.default_rng([settings.seed, int.from_bytes(digest[:8], "little")])
 
 
-def hedges_g(a: np.ndarray, b: np.ndarray) -> tuple[float, str]:
-    """Return Hedges' g (b minus a, bias corrected) and the reason when it is undefined."""
-    n_a, n_b = a.size, b.size
-    if n_a < 2 or n_b < 2:
-        return float("nan"), "fewer than 2 repeats in a condition"
-    pooled = np.sqrt(
-        ((n_a - 1) * np.var(a, ddof=1) + (n_b - 1) * np.var(b, ddof=1)) / (n_a + n_b - 2)
-    )
-    if pooled == 0:
-        return float("nan"), "no variation between repeats within either condition"
-    correction = 1 - 3 / (4 * (n_a + n_b) - 9)
-    return float((np.mean(b) - np.mean(a)) / pooled * correction), ""
+def tested_features(defs: list[FeatureDef], columns: list[str], include_axial: bool) -> list[str]:
+    """Return the feature columns tested: biological (and optionally axial) ones present."""
+    return [d.name for d in defs if pca_eligible(d, include_axial) and d.name in columns]
 
 
-def _paired_values(
-    reps: pd.DataFrame, control: str, treatment: str
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Return defined values paired by repeat, and the repeats left out for missing values.
-
-    Only the two compared conditions are considered.
-
-    Raises
-    ------
-    ValueError
-        When a repeat of one condition has no counterpart in the other.
-    """
-    two = reps[reps["condition"].isin([control, treatment])]
-    wide = two.pivot(index="repeat", columns="condition", values="value")
-    present = two.pivot(index="repeat", columns="condition", values="n_fovs_missing")
-    unmatched = present.index[present.reindex(columns=[control, treatment]).isna().any(axis=1)]
-    if len(unmatched):
-        raise ValueError(
-            "Paired comparison refused: repeat(s) "
-            f"{', '.join(map(str, unmatched))} lack one of the two conditions."
-        )
-    missing = wide.index[wide[[control, treatment]].isna().any(axis=1)].tolist()
-    wide = wide.drop(index=missing)
-    return wide[control].to_numpy(), wide[treatment].to_numpy(), [str(m) for m in missing]
-
-
-def _test(a: np.ndarray, b: np.ndarray, paired: bool) -> dict[str, object]:
-    """Run the design's t-test on repeat means, or say why it was not run or is degenerate."""
-    if min(a.size, b.size) < MIN_REPEATS_FOR_TEST:
-        return {
-            "test": "not run",
-            "p_value": np.nan,
-            "test_note": f"fewer than {MIN_REPEATS_FOR_TEST} biological repeats per condition",
-        }
-    if paired:
-        name, note = "paired t-test on repeat means", "assumes normal paired differences"
-        degenerate = np.ptp(b - a) == 0
-        result = None if degenerate else stats.ttest_rel(b, a)
-    else:
-        name, note = "Welch t-test on repeat means", "assumes approximately normal repeat means"
-        degenerate = np.ptp(a) == 0 or np.ptp(b) == 0
-        result = None if degenerate else stats.ttest_ind(b, a, equal_var=False)
-    if result is None or not np.isfinite(result.statistic) or not np.isfinite(result.pvalue):
-        return {
-            "test": f"{name}: not interpretable",
-            "p_value": np.nan,
-            "test_note": "zero variance between repeats (degenerate test)",
-        }
-    return {"test": name, "p_value": float(result.pvalue), "test_note": note}
-
-
-def compare(
-    table: pd.DataFrame, feature: str, control: str, treatment: str, paired: bool = False
-) -> dict[str, object]:
-    """Compare two conditions on one per-FOV feature, at the biological-repeat level.
-
-    Parameters
-    ----------
-    table
-        Per-FOV table.
-    feature
-        Feature column.
-    control, treatment
-        Condition names.
-    paired
-        True only when biological repeats are explicitly matched across conditions (the
-        same repeat identity means the same paired experiment).
-
-    Returns
-    -------
-    dict
-        Repeat and FOV counts, repeats left out (all FOVs missing), means, SDs,
-        difference, Hedges' g with its undefined reason, and the test result or the reason
-        it was not run or is not interpretable.
-
-    Raises
-    ------
-    ValueError
-        For an unknown condition, or a paired design with unmatched repeats.
-    """
-    for name in (control, treatment):
-        if name not in set(table["condition"]):
-            raise ValueError(f"Condition '{name}' is not in the table.")
-    all_reps = replicate_means(table, feature)
-    reps = all_reps[all_reps["condition"].isin([control, treatment])]
-    dropped = reps[reps["value"].isna()]
-    defined = reps.dropna(subset=["value"])
-    a = defined.loc[defined["condition"] == control, "value"].to_numpy()
-    b = defined.loc[defined["condition"] == treatment, "value"].to_numpy()
-    out: dict[str, object] = {
-        "feature": feature,
-        "control": control,
-        "treatment": treatment,
-        "design": "paired by biological repeat" if paired else "unpaired",
-        "n_repeats_control": int(a.size),
-        "n_repeats_treatment": int(b.size),
-        "n_fovs_used": int(defined["n_fovs"].sum()),
-        "n_fovs_missing": int(reps["n_fovs_missing"].sum()),
-        "repeats_excluded": "; ".join(
-            f"{r.condition}/{r.repeat}: all FOVs missing" for r in dropped.itertuples()
-        ),
-        "mean_control": float(np.mean(a)) if a.size else np.nan,
-        "mean_treatment": float(np.mean(b)) if b.size else np.nan,
-        "sd_control": float(np.std(a, ddof=1)) if a.size > 1 else np.nan,
-        "sd_treatment": float(np.std(b, ddof=1)) if b.size > 1 else np.nan,
-    }
-    out["difference"] = out["mean_treatment"] - out["mean_control"]
-    out["hedges_g"], out["hedges_g_note"] = hedges_g(a, b)
-    if paired:
-        a, b, missing = _paired_values(reps, control, treatment)
-        if missing:
-            out["repeats_excluded"] = "; ".join(
-                filter(
-                    None,
-                    [
-                        out["repeats_excluded"],
-                        f"pairs left out (missing value): {', '.join(missing)}",
-                    ],
-                )
-            )
-    out.update(_test(a, b, paired))
-    return out
-
-
-def readouts_for(columns: list[str]) -> dict[str, str]:
-    """Return the default readouts available in a table, adapting to the speed mode."""
+def _groups(table: pd.DataFrame, feature: str, condition: str) -> dict[str, np.ndarray]:
+    """Return the defined values of one condition per biological repeat."""
+    rows = table[table["condition"] == condition]
+    values = pd.to_numeric(rows[feature], errors="coerce")
     out = {}
-    for label, column in READOUTS.items():
-        if column not in columns:
-            column = column.replace("speed_xy", "speed_3d")
-        if column in columns:
-            out[label] = column
+    for repeat, group in values.groupby(rows[repeat_column(table)], sort=True):
+        defined = group.to_numpy(dtype=float)
+        # Sorted, so the shuffles (seeded from the test's identity) do not depend on row order.
+        defined = np.sort(defined[np.isfinite(defined)])
+        if defined.size:
+            out[str(repeat)] = defined
     return out
 
 
-def compare_all(
-    table: pd.DataFrame, control: str, treatment: str, paired: bool = False
-) -> pd.DataFrame:
-    """Compare the default readouts and the confounder QC columns.
+def _normalised(cond: dict, ctrl: dict, both: list[str]) -> tuple[dict, dict] | None:
+    """Values divided by their repeat's control mean; None when a control mean is <= 0."""
+    means = {r: float(np.mean(ctrl[r])) for r in both}
+    if not both or any(not m > 0 for m in means.values()):
+        return None
+    return {r: cond[r] / means[r] for r in both}, {r: ctrl[r] / means[r] for r in both}
 
-    Returns
-    -------
-    pandas.DataFrame
-        One row per readout or confounder, with a ``role`` column.
+
+def _sparse(sizes: dict[str, int]) -> list[str]:
+    """Repeats too small to balance to: < a quarter of the median repeat, or < 5 FOVs."""
+    typical = float(np.median(list(sizes.values())))
+    return [r for r, n in sizes.items() if n < SPARSE * typical or n < MIN_BALANCED]
+
+
+def _unbalanced(cond: dict, ctrl: dict, other_control: list[str]) -> bool:
+    """Return whether the repeats are unbalanced.
+
+    True when one repeat holds more than 25% more FOVs than another on a side, or the control
+    pools repeats the condition was not imaged in.
     """
+    for side in (cond, ctrl):
+        sizes = [len(v) for v in side.values()]
+        if sizes and max(sizes) > IMBALANCE * min(sizes):
+            return True
+    return bool(other_control)
+
+
+def _cell_tests(cond: dict, ctrl: dict, both: list[str], other: list[str], rng_for: _Seeds) -> dict:
+    """Run the FOV-level tests of one feature and condition, and their reruns."""
+    out: dict = {"retests": {}}
+    treated, control = np.concatenate(list(cond.values())), np.concatenate(list(ctrl.values()))
+    d, p = st.randomization(treated, control, rng_for.permutations, rng_for("fovs"))
+    out["d_fovs"] = d
+    out["p_fovs"] = np.nan if other else p
+    out["retests"]["p_fovs"] = lambda b, rng: st.randomization(treated, control, b, rng)[1]
+    norm = _normalised(cond, ctrl, both)
+    out["d_fovs_normalised"] = out["p_fovs_normalised"] = np.nan
+    if norm is not None:
+        nt, nc = np.concatenate(list(norm[0].values())), np.concatenate(list(norm[1].values()))
+        out["d_fovs_normalised"], out["p_fovs_normalised"] = st.randomization(
+            nt, nc, rng_for.permutations, rng_for("fovs_normalised")
+        )
+        out["retests"]["p_fovs_normalised"] = lambda b, rng: st.randomization(nt, nc, b, rng)[1]
+    out["unbalanced"] = _unbalanced({r: cond[r] for r in both} or cond, ctrl, other)
+    small = (
+        sorted(
+            set(_sparse({r: len(cond[r]) for r in both}))
+            | set(_sparse({r: len(ctrl[r]) for r in both}))
+        )
+        if both
+        else []
+    )
+    out["sparse_repeats"] = "; ".join(small)
+    kept = [r for r in both if r not in small] if out["unbalanced"] else []
+    kept = kept if len(kept) >= 2 else []
+    out["balanced_repeats"] = "; ".join(kept)
+    for suffix, normalise in (("", False), ("_normalised", True)):
+        out[f"d_balanced{suffix}"] = out[f"p_balanced{suffix}"] = np.nan
+        if kept and (not normalise or norm is not None):
+            t_parts, c_parts = [cond[r] for r in kept], [ctrl[r] for r in kept]
+            b0 = rng_for.balanced_permutations
+            d_b, p_b, *_ = st.balanced(
+                t_parts, c_parts, b0, rng_for(f"balanced{suffix}"), normalise
+            )
+            out[f"d_balanced{suffix}"], out[f"p_balanced{suffix}"] = d_b, p_b
+            out["retests"][f"p_balanced{suffix}"] = (
+                lambda b, rng, t=t_parts, c=c_parts, n=normalise: st.balanced(t, c, b, rng, n)[1]
+            )
+    return out
+
+
+def _screen_version(row: dict) -> str:
+    """Return the FOV-level test the screen reads: normalised, balanced when unbalanced."""
+    order = ["p_fovs_normalised", "p_fovs"]
+    if row["unbalanced"]:
+        order = ["p_balanced_normalised", "p_balanced", *order]
+    return next((c for c in order if np.isfinite(row[c])), "")
+
+
+class _Seeds:
+    """Per-test generators and shuffle counts of one feature and condition."""
+
+    def __init__(self, settings: ComparisonSettings, feature: str, condition: str) -> None:
+        self.settings, self.identity = settings, (feature, condition)
+        self.permutations = settings.permutations
+        self.balanced_permutations = settings.balanced_permutations
+
+    def __call__(self, test: str) -> np.random.Generator:
+        return _rng(self.settings, *self.identity, test)
+
+
+def _repeat_rows(feature: str, condition: str, cond: dict, ctrl: dict) -> list[dict]:
+    """Per-repeat effect sizes and means of one feature and condition (descriptive)."""
     rows = []
-    for label, column in readouts_for(list(table.columns)).items():
+    for repeat in sorted(set(cond) | set(ctrl)):
+        a, b = cond.get(repeat, np.array([])), ctrl.get(repeat, np.array([]))
         rows.append(
             {
-                "role": "readout",
-                "readout": label,
-                **compare(table, column, control, treatment, paired),
+                "feature": feature,
+                "condition": condition,
+                "repeat": repeat,
+                "n_fovs": a.size,
+                "n_control_fovs": b.size,
+                "mean": float(np.mean(a)) if a.size else np.nan,
+                "control_mean": float(np.mean(b)) if b.size else np.nan,
+                "d": st.cohen_d(a, b),
             }
         )
-    for column in CONFOUNDERS:
-        if column in table.columns and table[column].notna().any():
-            rows.append(
-                {
-                    "role": "potential confounder",
-                    "readout": column,
-                    **compare(table, column, control, treatment, paired),
-                }
+    return rows
+
+
+def _paired(cond: dict, ctrl: dict, both: list[str], scale: str) -> dict:
+    """Run the paired test on repeat means, the sign-flip test and the direction per repeat."""
+    a = np.array([np.mean(cond[r]) for r in both])
+    b = np.array([np.mean(ctrl[r]) for r in both])
+    change, p, note = st.paired_repeats(a, b, scale)
+    changes = np.log(a / b) if scale == "log ratio" else a - b
+    signs = np.sign(a - b)
+    return {
+        "repeats_paired": len(both),
+        "paired_scale": scale,
+        "change": float(np.exp(change)) if scale == "log ratio" and np.isfinite(change) else change,
+        "change_meaning": "fold change (geometric mean of repeat ratios)"
+        if scale == "log ratio"
+        else "mean difference of repeat means",
+        "p_repeats": p,
+        "repeats_note": note,
+        "p_sign_flip": st.sign_flip(changes),
+        "direction_per_repeat": "".join({1.0: "+", -1.0: "-"}.get(float(s), "0") for s in signs),
+    }
+
+
+def compare_one(
+    table: pd.DataFrame, feature: str, condition: str, scale: str, settings: ComparisonSettings
+) -> tuple[dict, list[dict], dict]:
+    """Every answer for one feature and condition, its per-repeat rows and its reruns."""
+    cond, ctrl = _groups(table, feature, condition), _groups(table, feature, settings.control)
+    both = sorted(set(cond) & set(ctrl))
+    other = sorted(set(ctrl) - set(cond))
+    row: dict = {
+        "feature": feature,
+        "condition": condition,
+        "control": settings.control,
+        "fovs": int(sum(v.size for v in cond.values())),
+        "control_fovs": int(sum(v.size for v in ctrl.values())),
+        "repeats": "; ".join(sorted(cond)),
+        "other_control_repeats": "; ".join(other),
+    }
+    if len(cond) == 0 or len(ctrl) == 0:
+        row["note"] = "no defined value in the condition or the control"
+        return row, [], {}
+    cells = _cell_tests(cond, ctrl, both, other, _Seeds(settings, feature, condition))
+    retests = cells.pop("retests")
+    row.update(cells)
+    row["permutations"] = settings.permutations
+    row.update(_paired(cond, ctrl, both, scale))
+    per_well = np.mean([st.effective_per_well([len(v) for v in s.values()]) for s in (cond, ctrl)])
+    row["chance_low"], row["chance_high"] = (
+        st.chance_without_effect(per_well, s) for s in st.TYPICAL_BETWEEN
+    )
+    row["note"] = (
+        "test as provided withheld: the control pools repeats the condition was not imaged in"
+        if other
+        else ""
+    )
+    return row, _repeat_rows(feature, condition, cond, ctrl), retests
+
+
+def _default_shuffles(column: str, settings: ComparisonSettings) -> int:
+    """Return the first-pass shuffles of a p column."""
+    return settings.balanced_permutations if "balanced" in column else settings.permutations
+
+
+def _correct(tests: pd.DataFrame, retests: dict, settings: ComparisonSettings) -> pd.DataFrame:
+    """Rerun tests at p <= 0.05 with enough shuffles, then add q-values per family."""
+    for _, rows in tests.groupby("family"):
+        for column in P_COLUMNS[:4]:
+            default = _default_shuffles(column, settings)
+            needed = st.permutations_for(int(np.isfinite(rows[column]).sum()), default)
+            for index in rows.index[rows[column] <= st.ALPHA]:
+                retest = retests.get((index, column))
+                if retest is None or needed <= default:
+                    continue
+                identity = (tests.at[index, "feature"], tests.at[index, "condition"], column)
+                tests.at[index, column] = retest(needed, _rng(settings, *identity, "rerun"))
+                tests.at[index, f"{column}_shuffles"] = needed
+        for column in P_COLUMNS:
+            tests.loc[rows.index, "q" + column[1:]] = st.benjamini_hochberg(
+                tests.loc[rows.index, column].to_numpy(dtype=float)
             )
-    return pd.DataFrame(rows)
+    return tests
+
+
+def _verdict(row: pd.Series) -> str:
+    """MorphoCoverage's reading of one feature and condition."""
+    screen = row.get("q_screen", np.nan) <= st.ALPHA
+    repeats = row.get("q_repeats", np.nan) <= st.ALPHA
+    if screen and repeats:
+        return "significant across repeats"
+    if screen:
+        return "candidate (exploratory FOV-level screen only)"
+    if repeats:
+        return "consistent across repeats (paired test only)"
+    if not np.isfinite(row.get("p_screen", np.nan)) and not np.isfinite(
+        row.get("p_repeats", np.nan)
+    ):
+        return "not tested"
+    return "no difference detected"
+
+
+def compare_conditions(
+    table: pd.DataFrame, defs: list[FeatureDef], settings: ComparisonSettings
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compare every condition with the control on every tested feature and QC column.
+
+    Parameters
+    ----------
+    table
+        Per-FOV table (time averages), with ``condition`` and a repeat identity.
+    defs
+        Per-FOV feature definitions (selects the biological features).
+    settings
+        Control and test choices.
+
+    Returns
+    -------
+    tuple of pandas.DataFrame
+        The tests (one row per feature and condition, ``family`` ``features`` or ``qc``, with
+        d, p, q, the screen version and the verdict) and the per-repeat descriptive table.
+
+    Raises
+    ------
+    ValueError
+        When the control is not in the table or is the only condition.
+    """
+    conditions = sorted(set(table["condition"]))
+    if settings.control not in conditions:
+        raise ValueError(f"The control '{settings.control}' is not a condition of the table.")
+    others = [c for c in conditions if c != settings.control]
+    if not others:
+        raise ValueError("Only the control is in the table; nothing to compare.")
+    columns = list(table.columns)
+    families = {"features": tested_features(defs, columns, settings.include_axial)}
+    qc = {d.name for d in defs if d.applicability == QC}
+    families["qc"] = [c for c in CONFOUNDERS if c in columns and c in qc]
+    rows, repeat_rows, retests = [], [], {}
+    for family, features in families.items():
+        for feature in features:
+            scale = st.paired_scale(pd.to_numeric(table[feature], errors="coerce").to_numpy(float))
+            for condition in others:
+                row, reps, tests = compare_one(table, feature, condition, scale, settings)
+                row["family"] = family
+                retests.update({(len(rows), k): v for k, v in tests.items()})
+                rows.append(row)
+                repeat_rows += reps
+    tests = pd.DataFrame(rows)
+    for column in (*P_COLUMNS, "p_sign_flip", "unbalanced"):
+        if column not in tests.columns:
+            tests[column] = np.nan
+    tests["screen_test"] = [_screen_version(r) for r in tests.to_dict("records")]
+    tests = _correct_with_screen(tests, retests, settings)
+    tests["verdict"] = [_verdict(r) for _, r in tests.iterrows()]
+    return tests, pd.DataFrame(repeat_rows)
+
+
+def _correct_with_screen(
+    tests: pd.DataFrame, retests: dict, settings: ComparisonSettings
+) -> pd.DataFrame:
+    """Rerun and correct, then copy the screen's p (after reruns) and correct it too."""
+    tests = _correct(tests, retests, settings)
+    tests["p_screen"] = [
+        r[r["screen_test"]] if r["screen_test"] else np.nan for r in tests.to_dict("records")
+    ]
+    for _, rows in tests.groupby("family"):
+        tests.loc[rows.index, "q_screen"] = st.benjamini_hochberg(
+            tests.loc[rows.index, "p_screen"].to_numpy(dtype=float)
+        )
+    return tests

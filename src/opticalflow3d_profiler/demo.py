@@ -5,8 +5,10 @@ checks the results against the ground truth:
 
 - condition ``ctrl``: nuclei move at 0.3 px/frame in random XY directions;
 - condition ``drug``: nuclei move at 0.6 px/frame, all within ±15° of +x (collective motion);
-- 3 biological repeats x 2 fields of view per condition, plus one listed file that does not
-  exist (its failure must be recorded, not skipped).
+- 3 biological repeats x 2 fields of view per condition, written in the MorphoBricks
+  layout ``experiment/<condition>/<repeat>/<fov>.tif`` (technical repeat ``single``) with
+  ground-truth masks in ``masks/nuclei/...``, plus one unreadable TIFF (its failure must be
+  recorded, not skipped).
 
 Every intermediate file is kept: input TIFFs, ground-truth masks, optical-flow TIFFs and
 manifests, feature tables, QC figures, PCA and comparison exports, and ``demo_report.md``
@@ -27,15 +29,21 @@ import tifffile
 
 from . import figures
 from .analysis import analyse, compare_conditions, export_analysis, load_runs
+from .comparison import ComparisonSettings
 from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, to_record
-from .experiment import read_metadata
+from .experiment import read_experiment_folder
 from .flow_store import open_result
+from .naming import ColumnNames
 from .pipeline import RunSettings, run_experiment
 from .profile_analysis import PcaSettings
 from .qc_export import export_qc_figures
 from .results import create_run, write_csv, write_text_atomic
 from .synthetic import SyntheticMovie, render
 
+MASK_TYPE = "nuclei"
+BROKEN = "fov9_unreadable"
+CHANNEL, OBJECT_SET = "H2B", "Nuclei"
+NAMES = ColumnNames(CHANNEL, OBJECT_SET)
 CONDITIONS = {"ctrl": (0.3, 360.0), "drug": (0.6, 30.0)}
 """Condition -> (XY speed in px/frame, direction spread in degrees)."""
 
@@ -87,56 +95,39 @@ def _write_fov(
         noise_sd=design.noise_sd,
         seed=seed,
     )
-    name = f"{condition}_rep{rep}_fov{fov}"
-    image, mask = folder / "images" / f"{name}.tif", folder / "masks" / f"{name}_mask.tif"
+    relative = Path(condition) / f"rep{rep}" / f"fov{fov}.tif"
+    image, mask = folder / "experiment" / relative, folder / "masks" / MASK_TYPE / relative
     for path in (image, mask):
         path.parent.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(image, render(movie), imagej=True, metadata={"axes": "TZYX"})
     truth = render(replace(movie, noise_sd=0.0), dtype="float64")
     inside = truth > movie.background + 0.3 * movie.amplitude
     tifffile.imwrite(mask, inside.astype(np.uint8), imagej=True, metadata={"axes": "TZYX"})
-    return {
-        "sample_id": name,
-        "position_id": f"pos{fov}",
-        "condition": condition,
-        "biological_repeat": f"rep{rep}",
-        "technical_repeat": "t1",
-        "batch": f"day{rep}",
-        "input_path": f"images/{name}.tif",
-        "mask_path": f"masks/{name}_mask.tif",
-    }
+    return {"condition": condition, "biological_repeat": f"rep{rep}", "position_id": f"fov{fov}"}
 
 
 def write_experiment(folder: Path, design: DemoDesign) -> Path:
-    """Write the synthetic images, ground-truth masks, metadata CSV and ground truth.
+    """Write the synthetic experiment folder, ground-truth masks and ground truth.
 
     Returns
     -------
     pathlib.Path
-        The metadata CSV.
+        The experiment folder (MorphoBricks layout).
     """
     rows = []
     for condition in CONDITIONS:
         for rep in range(1, design.repeats + 1):
             for fov in range(1, design.fovs_per_repeat + 1):
                 rows.append(_write_fov(folder, design, condition, rep, fov, len(rows) + 1))
-    rows.append(
-        {
-            **rows[0],
-            "sample_id": "missing_file",
-            "position_id": "pos9",
-            "input_path": "images/does_not_exist.tif",
-            "mask_path": "",
-        }
-    )
-    path = folder / "metadata.csv"
-    pd.DataFrame(rows).to_csv(path, index=False)
+    (folder / "experiment" / "ctrl" / "rep1" / f"{BROKEN}.tif").write_bytes(b"not a TIFF file")
+    path = folder / "experiment"
     truth = {
         "conditions": {
             c: {"xy_speed_px_per_frame": s, "direction_spread_deg": d, "direction_deg": 0.0}
             for c, (s, d) in CONDITIONS.items()
         },
         "design": to_record(design),
+        "fields_of_view": rows,
     }
     (folder / "ground_truth.json").write_text(json.dumps(truth, indent=2), encoding="utf-8")
     return path
@@ -166,9 +157,8 @@ class Checks:
 
 
 def _condition_means(table: pd.DataFrame, column: str) -> dict[str, float]:
-    """Return the mean of biological-repeat means of a column per condition."""
-    reps = table.groupby(["condition", "biological_repeat"])[column].mean()
-    return reps.groupby(level=0).mean().to_dict()
+    """Return the mean over fields of view of a column per condition."""
+    return table.groupby("condition")[column].mean().to_dict()
 
 
 def _check_status(checks: Checks, run: Path, design: DemoDesign) -> None:
@@ -179,10 +169,10 @@ def _check_status(checks: Checks, run: Path, design: DemoDesign) -> None:
     failed = fovs[fovs["status"] == "failed"]
     checks.add("fields of view completed", f"{n_real}", len(complete), len(complete) == n_real)
     checks.add(
-        "missing file recorded as failed",
-        "1 failure, 'does not exist'",
-        f"{len(failed)}: {failed['message'].tolist()}",
-        len(failed) == 1 and "does not exist" in failed["message"].iloc[0],
+        "unreadable TIFF recorded as failed",
+        f"1 failure ({BROKEN})",
+        f"{len(failed)}: {failed['position_id'].tolist()}",
+        len(failed) == 1 and failed["position_id"].iloc[0] == BROKEN,
     )
     half = FlowParameters().half_window
     expected = list(range(half, design.shape[0] - half))
@@ -201,7 +191,7 @@ def _check_status(checks: Checks, run: Path, design: DemoDesign) -> None:
 def _check_motion(checks: Checks, per_fov: pd.DataFrame, design: DemoDesign) -> None:
     """Check recovered speed, coherence and direction against the ground truth."""
     scale = design.calibration.pixel_size_x / design.calibration.frame_interval
-    speed = _condition_means(per_fov, "speed_xy_median__tmean")
+    speed = _condition_means(per_fov, NAMES.column("speed_xy_median"))
     ratio = speed["drug"] / speed["ctrl"]
     checks.add("speed ratio drug/ctrl", "1.5-2.6 (true 2.0)", round(ratio, 3), 1.5 <= ratio <= 2.6)
     for condition, (true_speed, _) in CONDITIONS.items():
@@ -212,14 +202,16 @@ def _check_motion(checks: Checks, per_fov: pd.DataFrame, design: DemoDesign) -> 
             round(gain, 3),
             0.4 <= gain <= 1.0,
         )
-    coherence = _condition_means(per_fov, "coherence_xy_global__tmean")
+    coherence = _condition_means(per_fov, NAMES.column("coherence_xy_global"))
     checks.add(
         "global XY coherence drug", "> 0.8", round(coherence["drug"], 3), coherence["drug"] > 0.8
     )
     checks.add(
         "global XY coherence ctrl", "< 0.35", round(coherence["ctrl"], 3), coherence["ctrl"] < 0.35
     )
-    direction = per_fov.loc[per_fov["condition"] == "drug", "xy_dominant_direction_deg__tcircmean"]
+    direction = per_fov.loc[
+        per_fov["condition"] == "drug", NAMES.column("xy_dominant_direction_deg")
+    ]
     checks.add(
         "dominant direction drug",
         "within ±15° of 0°",
@@ -231,21 +223,21 @@ def _check_motion(checks: Checks, per_fov: pd.DataFrame, design: DemoDesign) -> 
 def _check_axial_and_confounders(checks: Checks, per_fov: pd.DataFrame, design: DemoDesign) -> None:
     """Check the axial noise floor (true vz = 0) and the nuclear-size confounder."""
     z_scale = design.calibration.pixel_size_z / design.calibration.frame_interval
-    drift = float((per_fov["vz_mean__tmean"] / z_scale).abs().max())
+    drift = float((per_fov[NAMES.column("vz_mean")] / z_scale).abs().max())
     checks.add(
         "net axial drift (true vz = 0)",
         f"|mean vz| < {design.drift_tolerance:g} slice/frame",
         round(drift, 4),
         drift < design.drift_tolerance,
     )
-    floor = float((per_fov["vz_abs_mean__tmean"] / z_scale).max())
+    floor = float((per_fov[NAMES.column("vz_abs_mean")] / z_scale).max())
     checks.add(
         "axial noise floor (true vz = 0)",
         f"mean|vz| < {design.axial_floor_tolerance:g} slice/frame",
         round(floor, 4),
         floor < design.axial_floor_tolerance,
     )
-    size = _condition_means(per_fov, "qc_object_mean_voxels__tmean")
+    size = _condition_means(per_fov, "qc_object_mean_voxels")
     size_ratio = size["drug"] / size["ctrl"]
     checks.add(
         "confounder: nuclear object size drug/ctrl",
@@ -269,8 +261,9 @@ def check_analysis(checks: Checks, run: Path, out: Path, design: DemoDesign) -> 
     features = load_runs([run])
     settings = PcaSettings()
     result = analyse(features, settings)
-    comparison = compare_conditions(features, "ctrl", "drug")
-    export_analysis(out, features, settings, result, comparison)
+    comparison_settings = ComparisonSettings("ctrl")
+    comparison = compare_conditions(features, comparison_settings)
+    export_analysis(out, features, settings, result, comparison, comparison_settings)
     figures.save(
         figures.pca_scatter(result.scores, result.explained_variance_ratio),
         out / "figures" / "pca_pc1_pc2.png",
@@ -280,10 +273,10 @@ def check_analysis(checks: Checks, run: Path, out: Path, design: DemoDesign) -> 
         figures.correlation_heatmap(result.prepared.matrix.corr()),
         out / "figures" / "feature_correlation.png",
     )
-    for _, row in comparison[comparison["role"] == "readout"].iterrows():
+    for key in ("speed_xy_median", "coherence_xy_global"):
         figures.save(
-            figures.condition_plot(features.table, row["feature"], row["readout"]),
-            out / "figures" / f"condition_{row['feature']}.png",
+            figures.condition_plot(features.table, NAMES.column(key), key),
+            out / "figures" / f"condition_{key}.png",
         )
     pc1 = result.scores.groupby("condition")["PC1"]
     separated = pc1.max().min() < pc1.min().max()
@@ -293,19 +286,24 @@ def check_analysis(checks: Checks, run: Path, out: Path, design: DemoDesign) -> 
         f"ranges {pc1.min().round(2).to_dict()} to {pc1.max().round(2).to_dict()}",
         bool(separated),
     )
-    readouts = comparison.set_index("readout")
-    tested = readouts.loc["median motion magnitude"]
+    tests = comparison[0].set_index("feature")
+    coherence = tests.loc[NAMES.column("coherence_xy_global")]
     checks.add(
-        "comparison at repeat level",
-        f"{design.repeats} repeats per condition, Welch",
-        f"{tested['n_repeats_control']}/{tested['n_repeats_treatment']}, {tested['test']}",
-        tested["n_repeats_control"] == design.repeats and tested["test"].startswith("Welch"),
+        "comparison: FOVs and paired repeats",
+        f"{design.repeats * design.fovs_per_repeat} FOVs a side, {design.repeats} repeats paired",
+        f"{coherence['fovs']}/{coherence['control_fovs']} FOVs, "
+        f"{coherence['repeats_paired']} repeats",
+        coherence["repeats_paired"] == design.repeats
+        and coherence["fovs"] == design.repeats * design.fovs_per_repeat,
     )
     checks.add(
-        "comparison: coherence higher in drug",
-        "difference > 0",
-        round(float(readouts.loc["directional coherence", "difference"]), 3),
-        readouts.loc["directional coherence", "difference"] > 0,
+        "comparison: coherence higher in drug in every repeat",
+        "d > 0, q_screen <= 0.05, direction +++",
+        f"d {coherence['d_fovs']:.2f}, q {coherence['q_screen']:.4f}, "
+        f"{coherence['direction_per_repeat']}",
+        coherence["d_fovs"] > 0
+        and coherence["q_screen"] <= 0.05
+        and coherence["direction_per_repeat"] == "+" * design.repeats,
     )
 
 
@@ -324,7 +322,8 @@ def check_mask_run(
     )
     masked = pd.read_csv(mask_run / "features" / "features_per_fov.csv")
     merged = threshold_table.merge(masked, on="fov_uid", suffixes=("_thr", "_mask"))
-    diff = (merged["speed_xy_median__tmean_mask"] / merged["speed_xy_median__tmean_thr"] - 1).abs()
+    speed = NAMES.column("speed_xy_median")
+    diff = (merged[f"{speed}_mask"] / merged[f"{speed}_thr"] - 1).abs()
     checks.add(
         "threshold vs ground-truth mask: median speed",
         "relative difference < 20%",
@@ -365,7 +364,7 @@ def run_demo(
     if folder.exists() and any(folder.iterdir()):
         raise ValueError(f"{folder} is not empty; the demo writes into a new folder.")
     progress("Writing synthetic images and ground-truth masks...")
-    metadata = read_metadata(write_experiment(folder, design))
+    metadata = read_experiment_folder(write_experiment(folder, design), folder / "masks", MASK_TYPE)
     features = FeatureSettings(
         reliability_value=design.reliability_threshold, region_size_px=64, min_region_voxels=100
     )
@@ -376,6 +375,8 @@ def run_demo(
         FlowParameters(mode="xyz"),  # the demo validates the 3D engine, including Z
         features=features,
         foreground=ForegroundSpec("threshold", design.intensity_threshold),
+        channel_name=CHANNEL,
+        object_set=OBJECT_SET,
     )
     run = create_run(folder / "results", "run-threshold")
     progress("Step 2: optical flow...")
