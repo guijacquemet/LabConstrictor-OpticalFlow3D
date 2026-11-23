@@ -439,3 +439,12 @@ def test_an_undefined_brightness_change_gets_the_reason_its_record_supports():
     assert "cause is not recorded" in brightness_reason({"brightness_change_per_frame": None})
     nan = brightness_reason({"brightness_change_per_frame": float("nan")})
     assert "central frame" in nan
+
+
+def test_shared_repeat_labels_are_named_for_the_user():
+    from opticalflow3d_profiler.notebook_analysis_ui import shared_repeats
+
+    table = pd.DataFrame(
+        {"run": ["A", "B", "A", "B"], "biological_repeat": ["r1", "r1", "r2", "r3"]}
+    )
+    assert shared_repeats(table) == {"r1": ["A", "B"]}

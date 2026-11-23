@@ -171,3 +171,15 @@ def test_known_axes_keep_their_role_when_others_are_unknown():
     assert "axis 2 is Z" in named_axis_conflicts("ZTYX", "QZYX")
     assert "axis 1 is Z" in named_axis_conflicts("TZYX", "ZCYX")
     assert named_axis_conflicts("TZYX", "IQYX") == ""
+
+
+def test_ome_default_unit_notes_reach_the_section_1_summary(tmp_path):
+    # Re-validation: the note must be in the table section 1 shows before confirmation.
+    from opticalflow3d_profiler.experiment_check import header_summary
+
+    path = tmp_path / "nounit.ome.tif"
+    tifffile.imwrite(path, np.zeros((7, 3, 8, 8), np.uint16), ome=True, photometric="minisblack",
+                     metadata={"axes": "TZYX", "TimeIncrement": 30.0})  # fmt: skip
+    table = header_summary(inspect_tiff(path))
+    notes = table.loc[table["field"] == "note", "value"]
+    assert notes.str.contains("TimeIncrement (unit not stated: OME default s)", regex=False).any()
