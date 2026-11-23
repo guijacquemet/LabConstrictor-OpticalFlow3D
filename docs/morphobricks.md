@@ -1,14 +1,14 @@
 # MorphoBricks conventions in the OpticalFlow3D Profiler
 
-The profiler follows three MorphoBricks conventions: the experiment folder layout, the feature
-column names and the MorphoCoverage statistics. It **imports no MorphoBricks package**. The
-rules were reimplemented from the sources below (all MIT licence, CellMigrationLab).
+The profiler follows the MorphoBricks experiment folder layout and feature column names
+(reimplemented from the sources below), and hands the condition statistics and the report to
+**MorphoCoverage, a dependency** pinned to a commit (all MIT licence, CellMigrationLab).
 
 | Convention | Source | Commit | Profiler module |
 |---|---|---|---|
 | Folder layout, labels, `position_id` | morphobricks-preprocessing `docs/contract.md` §1, `discovery.py`, `image_names.py` | `7cfe8e4` (2026-11-22) | `discovery.py` |
 | Feature column names | MorphoFeature `src/morphofeature/naming.py` (decision D09) | `7537a06` (2026-11-22) | `naming.py` |
-| Condition statistics | MorphoCoverage `docs/report/conditions.md`, `statistics.cohen_d`, `sampling_unit/contrast_cells.py`, `sampling_unit/_balanced.py`, `sampling_unit/_cell_chance.py` | `209b9be` (2026-11-18) | `statistics.py`, `comparison.py` |
+| Condition statistics and report | MorphoCoverage (`report`, `html_report`), **imported** | `209b9be` (2026-11-18) | `coverage.py` |
 
 ## Experiment folder
 
@@ -56,50 +56,28 @@ A metadata CSV with the same columns plus `image_path` is still accepted.
 - `qc_*` columns are observation metadata and keep their plain names.
 - Nothing is averaged per biological repeat in a saved table.
 
-## Statistics (MorphoCoverage rules, FOV as observation)
+## Statistics and report: MorphoCoverage
 
-`comparison.compare_conditions` compares every condition with the declared control on every
-biological feature. QC confounders are compared as a separate family.
+`coverage.py` turns the per-FOV table into MorphoCoverage's two input tables and its `Setup`,
+then runs its `report()` and its full `html_report()`. Nothing statistical is computed here.
 
-1. **Cohen's d** on the fields of view, pooled and per repeat (`condition_tests_per_repeat.csv`).
-2. **The FOV-level randomization test** on Cohen's d. Labels are shuffled over the fields of view,
-   and `p = (extreme + 1) / (B + 1)` with 9999 shuffles.
-   - It is reported on raw values and on values divided by the mean of the control **of the same
-     biological repeat**.
-   - The test on raw values is withheld when the control pools repeats that the condition was not
-     imaged in.
-   - The repeats are **unbalanced** when one repeat has more than 25% more FOVs than another, or
-     when the control pools other repeats. In that case the **balanced permutation test** is also
-     given: the median d over 100 draws, each taking the same number of FOVs from every repeat,
-     with labels shuffled within each repeat (999 labellings).
-   - A repeat with fewer than 5 FOVs, or with less than a quarter of the median repeat's FOVs, is
-     left out of the balanced test.
-   - The screen reads the normalised version, or the balanced one when the repeats are unbalanced.
-   - This test is **exploratory**: it treats fields of view as independent. `chance_low` and
-     `chance_high` give its false-positive rate when the effect varies between repeats by 0.25 to
-     0.5 SD, `2 P(Z > 1.96 / sqrt(1 + n s² / 2))`.
-3. **The paired t-test on the repeat means**, from 3 biological repeats that hold both the
-   condition and the control.
-   - It uses log ratios when every observation of the feature is positive, and differences
-     otherwise. The scale is chosen once per feature.
-   - The exact sign-flip test is added from 6 repeats.
+- **Observation:** the field of view (`observation_unit="fov"`), its time-averaged profile from
+  `features_per_fov.csv`. Time points are never replicates.
+- **Features:** the biological features (and the experimental axial ones on request; an axial
+  readout is always included). `qc_*` columns, directions and features undefined in every field
+  of view are not declared; the last are listed.
+- **Repeats:** MorphoCoverage pairs biological repeats across conditions only by a confirmed
+  `repeat_group`. The design step asks the user to confirm that a biological-repeat label is the
+  same repeat in every condition. The repeat identity (the folder label for one run or for runs
+  whose labels are declared shared, `<run>/<label>` otherwise) becomes both `biological_repeat`
+  and `repeat_group`, so the field-of-view key stays unique across runs. A design in which no
+  repeat holds both the control and another condition is refused.
+- **Design:** the control, the readout and the seed are chosen in the notebook. Each report
+  folder holds `report.html` with its figures and data, `morphocoverage_objects.csv`,
+  `morphocoverage_fovs.csv` and `design.json` (the design, the declared features, the runs and the
+  MorphoCoverage version and commit).
 
-Benjamini-Hochberg q-values are computed per p column, over every feature and condition of a
-family. A test at `p ≤ 0.05` is rerun with `max(B, ceil(K / 0.05))` shuffles, so that its q can
-fall below 0.05. Every shuffle is seeded from the seed and the test's identity, so results do
-not depend on the order of rows or tests.
-
-Verdicts:
-
-| Verdict | Condition |
-|---|---|
-| significant across repeats | `q_screen ≤ 0.05` and `q_repeats ≤ 0.05` |
-| candidate (exploratory FOV-level screen only) | screen only |
-| consistent across repeats (paired test only) | paired test only |
-| no difference detected | neither |
-| not tested | no test could be run |
-
-Not reimplemented:
-- several controls and the contrast table;
-- within-repeat tests over technical repeats;
-- the population, novelty and "did I image enough" analyses.
+What the report contains is described in MorphoCoverage's own documentation
+(`docs/report/conditions.md`): Cohen's d on the fields of view, the exploratory FOV-level
+randomization screen, the paired t-test on the repeat means, Benjamini-Hochberg correction, the
+PCA/UMAP and each feature's figure.

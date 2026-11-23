@@ -52,9 +52,9 @@ Findings:
 
 Consequences for the profiler (agreed): the algorithm is kept unchanged; speeds are
 reported as *optical-flow speeds* in upstream units or as µm/min flagged *uncalibrated
-gain*; XY speed is the default; Z-dependent features are experimental and excluded from
-PCA by default; foreground size and axial extent are exported as QC confounders because
-the gain depends on them.
+gain*; XY speed is the default; Z-dependent features are experimental and given to
+MorphoCoverage only on request; foreground size and axial extent are exported as QC columns
+because the gain depends on them.
 
 ## Synthetic end-to-end demo (`tools/demo_synthetic.py`)
 
@@ -70,16 +70,17 @@ A 12-field-of-view experiment: 256 × 256 × 11 × 15, 80 nuclei, noise SD 20, c
 | dominant direction drug | within 2.9° of 0° |
 | net axial drift (true vz = 0) | ≤ 0.0022 slice/frame |
 | axial noise floor (true vz = 0) | mean \|vz\| ≤ 0.020 slice/frame |
-| PCA | PC1 (91 % of variance) separates the conditions |
-| threshold versus ground-truth-mask foreground | median speed within 0.8 % |
+| MorphoCoverage, coherence drug vs ctrl | d 2.6, higher in 3 of 3 repeats, significant across repeats |
+| whole-image re-extraction | verified flow reused, `whole__` columns |
 
 **Axial noise floor.** With no true axial motion, mean |vz| is about 0.02 slices/frame,
 about 5 % of the lateral speed in voxel units. With 2 µm slices and 0.65 µm pixels, physical
 scaling multiplies it about 3×. In µm/min, |vz| features of slowly moving samples are then
 dominated by this floor. This is one more reason why axial features are experimental.
 
-Runtime: 645 s for the whole demo (12 fields of view, flow, features, QC figures, PCA and a
-second feature extraction), 0.47 GB peak RSS, on a 4-vCPU VM.
+Runtime (earlier measurement, before the MorphoCoverage report replaced the PCA): 645 s for the
+whole demo (12 fields of view, flow, features, QC figures and a second feature extraction),
+0.47 GB peak RSS, on a 4-vCPU VM. The MorphoCoverage report adds about 20 s.
 
 ## First real crop: brightness change (day6_wt_5-1, 15 × 11 × 256 × 256)
 

@@ -6,11 +6,12 @@ Guidance for AI agents and people changing this repository.
 
 - `src/opticalflow3d_profiler/`: the package. One job per module:
   - **pure:** `config`, `validation`, `flow_features`, `feature_dictionary`, `temporal_features`,
-    `experiment`, `naming`, `statistics`, `profile_analysis`, `comparison`, `synthetic`;
-  - **I/O:** `image_io`, `discovery`, `flow_backend`, `flow_store`, `foreground`, `results`,
-    `analysis`, `figures`;
-  - **orchestration:** `pipeline`, `external`;
-  - **UI:** `notebook_ui`, `notebook_analysis_ui`.
+    `experiment`, `naming`, `brightness`, `foreground`, `synthetic`;
+  - **I/O:** `image_io`, `discovery`, `experiment_check`, `flow_backend`, `flow_store`, `results`,
+    `analysis`, `coverage` (MorphoCoverage input and report), `figures`, `qc_export`;
+  - **orchestration:** `pipeline`, `demo`;
+  - **UI:** `notebook_ui` (sections 1-2), `notebook_analysis_ui` (sections 3-4 and the demo),
+    `progress` (tqdm bars), `report_link` (opens the report in a new tab).
 - `src/opticalflow3d_profiler/_upstream/calc_flow.py`: an **unchanged** copy of OpticalFlow3D at
   commit `6b88604`. Never edit it: `flow_backend.upstream_identity` checks its SHA-256. To update
   it, replace the file, change the pin and hash in `_upstream/__init__.py` and `README.md`, and
@@ -19,16 +20,18 @@ Guidance for AI agents and people changing this repository.
   (exact pins). The template merges these pins into `requirements.txt`. The cells only call
   `notebook_analysis_ui.build()`.
 - `tests/profiler/`, `tools/check_profiler.py`, `tools/benchmark_flow.py`, `docs/validation.md`.
-- MorphoBricks conventions (folder layout, column names, MorphoCoverage statistics) are
-  reimplemented, never imported; `docs/morphobricks.md` records the source commits. Keep the
-  FOV identity (`condition`, `biological_repeat`, `technical_repeat`, `position_id`), the
-  `{channel}__{object_set}__{feature}` names and the field of view as the observation.
+- Condition statistics and the report are MorphoCoverage's (a dependency pinned to a commit in
+  `requirements.yaml`, the Colab install cell and `tools/requirements-checks.txt`); never
+  reimplement them here. The folder layout and the column names follow MorphoBricks
+  (`docs/morphobricks.md`). Keep the FOV identity (`condition`, `biological_repeat`,
+  `technical_repeat`, `position_id`), the `{object_set}__{feature}` names (single-channel
+  videos; `qc_*` columns are metadata) and the field of view as the observation.
 - Everything else (`.tools`, `.github/workflows` except `profiler_checks.yml`, `app/`,
   `construct.yaml`) belongs to the LabConstrictor template. Do not edit it by hand, except
   the app images: `app/logo/` is drawn by `tools/draw_icon.py` and referenced by the image keys
   and icon `extra_files` of `construct.yaml` and the icons of `app/menuinst/notebook_launcher.json`.
 
-## Rules (MorphoBricks spec §9 conventions, without MorphoBricks dependencies)
+## Rules (MorphoBricks spec §9 conventions)
 
 - Python 3.11. Ruff (`src/ruff.toml`), 100 columns, NumPy docstrings, annotations, and
   `from __future__ import annotations`.
@@ -40,8 +43,8 @@ Guidance for AI agents and people changing this repository.
   manifest. Reuse of cached optical flow requires an identical identity and identical file hashes.
 - Every new feature needs a `feature_dictionary` entry with its applicability and the reason it
   can be undefined.
-- Out of scope for V1: tiling, GPU, multiprocessing, segmentation, tracking, OME-Zarr,
-  MorphoBricks integration, Fiji/napari/QuPath bridges, and parameter optimisation.
+- Out of scope for V1: tiling, GPU, multiprocessing, segmentation, masks, tracking, OME-Zarr,
+  Fiji/napari/QuPath bridges, and parameter optimisation.
 
 ## Checks
 

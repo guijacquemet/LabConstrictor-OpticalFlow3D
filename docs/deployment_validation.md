@@ -1,5 +1,8 @@
 # Deployment validation (PR 3)
 
+> **Historical (release 0.1.0).** The notebook has since been restructured into sections 0-4 and
+> uses MorphoCoverage; this page records what was validated for 0.1.0 and is not re-run here.
+
 What was run, on 23 November 2026, in a Linux x86-64 container (4 vCPU, 15 GB RAM). **The
 constructor installer itself was not built here:** downloading a conda binary was not allowed in
 that environment. It is built by the template's `Build Release Installers` workflow when a release
