@@ -78,5 +78,11 @@ batch, input_path` (optional `mask_path`). Relative paths are resolved from the 
 ## Licence and citation
 
 The vendored OpticalFlow3D code keeps its BSD-3-Clause licence
-(`src/opticalflow3d_profiler/_upstream/LICENSE`). Please cite OpticalFlow3D and
-[LabConstrictor](https://doi.org/10.48550/arXiv.2603.10704).
+(`src/opticalflow3d_profiler/_upstream/LICENSE`). If you use this app, please cite the OpticalFlow3D
+paper:
+
+> Lee, R. M., Eisenman, L. R., Hobson, C. M., Aaron, J. S. and Chew, T.-L. (2026). OpticalFlow3D –
+> a tool for measuring amorphous motion in three-dimensional fluorescence microscopy images.
+> *J. Cell Sci.* 139(21), jcs264851. https://doi.org/10.1242/jcs.264851
+
+and [LabConstrictor](https://doi.org/10.48550/arXiv.2603.10704).
