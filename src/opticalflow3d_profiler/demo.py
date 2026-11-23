@@ -347,7 +347,6 @@ def run_demo(
     )
     settings = RunSettings(
         "TZYX",
-        None,
         design.calibration,
         FlowParameters(mode="xyz"),  # the demo validates the 3D engine, including Z
         features=features,

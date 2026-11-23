@@ -79,10 +79,11 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
     run_dirs
         Run folders written by the pipeline.
     shared_repeat_labels
-        False (default): a biological-repeat label identifies a repeat only within its run
-        (``repeat_id = <run>/<label>``), so ``r1`` of two runs counts as two repeats. True:
-        the same label in different runs is the same biological repeat (for example the
-        control and treatment of one experiment day processed as separate runs).
+        False (default): with several runs, a biological-repeat label identifies a repeat
+        only within its run (``repeat_id = <run>/<label>``), so ``r1`` of two runs counts as
+        two repeats. True: the same label in different runs is the same biological repeat
+        (for example the control and treatment of one experiment day processed as separate
+        runs). With one run, ``repeat_id`` is the label itself.
 
     Returns
     -------
@@ -133,14 +134,8 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
         2,
         "repeat_id",
         combined["biological_repeat"]
-        if shared_repeat_labels
+        if shared_repeat_labels or len(runs) == 1
         else combined["run"] + "/" + combined["biological_repeat"],
     )
     defs = [FeatureDef(**d) for d in dictionary["fov_features"]]
     return FeatureSet(combined, defs, dictionary["units"], [r.as_posix() for r in runs])
-
-
-def metadata_columns(table: pd.DataFrame) -> list[str]:
-    """Return the identification columns of a combined table (never features)."""
-    columns = ("run", "repeat_id", *METADATA_COLUMNS, "undefined_features")
-    return [c for c in columns if c in table.columns]

@@ -2,7 +2,7 @@
 
 For visual confirmation of each intermediate step, ``<run>/qc/<fov_uid>/`` receives:
 
-- ``input_montage_z<z>.png``: the analysed channel at one Z slice for every time point;
+- ``input_montage_z<z>.png``: the video at one Z slice for every time point;
 - ``foreground_t<t>.png``: the foreground outline at each optical-flow time point (when
   a foreground is defined);
 - ``flow_t<t>.png``: image with flow vectors (unreliable vectors grey), XY speed and
@@ -62,7 +62,7 @@ def export_fov(
     status
         The field of view's row of ``fovs.csv`` (metadata and status columns).
     settings
-        Run settings (axes, channel, foreground and reliability).
+        Run settings (axes, foreground and reliability).
     z
         Z slice to show; default is the middle slice.
 
@@ -73,7 +73,7 @@ def export_fov(
     """
     uid = str(status["fov_uid"])
     out = Path(run_dir) / "qc" / uid
-    spec = ImageSpec(Path(str(status["image_path"])), settings.axes, settings.channel)
+    spec = ImageSpec(Path(str(status["image_path"])), settings.axes)
     header = inspect_tiff(spec.path)
     dims = dimensions(spec, header)
     z = dims["Z"] // 2 if z is None else z

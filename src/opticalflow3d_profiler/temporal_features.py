@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .feature_dictionary import AXIAL, BIOLOGICAL, ORIENTATION, FeatureDef
+from .feature_dictionary import ORIENTATION, FeatureDef
 
 
 def _is_angle(definition: FeatureDef) -> bool:
@@ -98,10 +98,3 @@ def aggregate_fov(
             undefined[d.name] = f"{defined.size} defined frame(s) of {series.size}"
     values["n_flow_frames"] = float(len(frames))
     return values, undefined
-
-
-def pca_eligible(definition: FeatureDef, include_axial: bool) -> bool:
-    """Return True when a column may be a PCA input under the given choice."""
-    if definition.applicability == BIOLOGICAL:
-        return True
-    return include_axial and definition.applicability == AXIAL

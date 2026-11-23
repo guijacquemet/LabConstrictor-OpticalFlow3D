@@ -149,7 +149,7 @@ def check_axes(confirmed_axes: str, shape: tuple[int, ...]) -> list[Issue]:
     return issues
 
 
-def check_channel(axes: str, shape: tuple[int, ...], channel: int | None = None) -> list[Issue]:
+def check_channel(axes: str, shape: tuple[int, ...]) -> list[Issue]:
     """Check that the video has a single channel.
 
     The profiler analyses single-channel videos: a ``C`` axis is accepted only with length 1.
@@ -161,13 +161,11 @@ def check_channel(axes: str, shape: tuple[int, ...], channel: int | None = None)
         Confirmed axes in file order.
     shape
         Shape of the file's first series.
-    channel
-        Kept for the record; only ``None`` or ``0`` are valid.
 
     Returns
     -------
     list of Issue
-        An error for a multi-channel file or a channel index other than 0.
+        An error for a multi-channel file.
     """
     axes = axes.upper()
     n_channels = shape[axes.index("C")] if "C" in axes and len(axes) == len(shape) else 1
@@ -178,15 +176,6 @@ def check_channel(axes: str, shape: tuple[int, ...], channel: int | None = None)
                 "multi_channel_not_supported",
                 f"The image has {n_channels} channels; this tool analyses single-channel videos.",
                 "Save the nuclear channel alone as a TIFF (for example with Fiji) and use that.",
-            )
-        ]
-    if channel not in (None, 0):
-        return [
-            Issue(
-                "error",
-                "channel_out_of_range",
-                f"Channel {channel} does not exist in a single-channel video.",
-                "Clear the channel selection.",
             )
         ]
     return []

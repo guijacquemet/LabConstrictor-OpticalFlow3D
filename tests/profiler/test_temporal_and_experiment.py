@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from opticalflow3d_profiler.experiment import fov_uid, read_metadata, validate_metadata
+from opticalflow3d_profiler.experiment import fov_uid, validate_metadata
 from opticalflow3d_profiler.feature_dictionary import BIOLOGICAL, QC, frame_dictionary
 from opticalflow3d_profiler.temporal_features import aggregate_fov, fov_dictionary
 from opticalflow3d_profiler.validation import InputError
@@ -74,16 +74,6 @@ def test_metadata_validation():
         validate_metadata(pd.DataFrame([metadata(condition=" ")]))
     with pytest.raises(InputError, match="invalid_name"):
         validate_metadata(pd.DataFrame([metadata(condition="NA")]))
-
-
-def test_relative_paths_resolve_against_the_csv(tmp_path):
-    pd.DataFrame([metadata(image_path="images/a.tif")]).to_csv(tmp_path / "m.csv", index=False)
-    table = read_metadata(tmp_path / "m.csv")
-    assert table.loc[0, "image_path"] == (tmp_path.resolve() / "images/a.tif").as_posix()
-    old = pd.DataFrame([metadata()]).rename(columns={"image_path": "input_path"})
-    old.to_csv(tmp_path / "old.csv", index=False)
-    with pytest.raises(InputError, match="image_path"):
-        read_metadata(tmp_path / "old.csv")
 
 
 def test_intensity_columns_are_opt_in_in_the_dictionary():

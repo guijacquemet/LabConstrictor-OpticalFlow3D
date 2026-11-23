@@ -21,7 +21,6 @@ FlowMode = Literal["auto", "xyz", "xy_per_slice"]
 AUTO_PER_SLICE_ANISOTROPY = 3.0
 """In ``auto`` mode, Z spacing / XY pixel size above this selects per-slice 2D flow."""
 
-CANONICAL_AXES = "TZYX"
 """Axis order the upstream ``calc_flow3D`` expects (time, z, y, x)."""
 
 
@@ -123,16 +122,12 @@ class ImageSpec:
     axes
         Confirmed axis letters of the file's first series, in file order, using only
         ``T``, ``Z``, ``C``, ``Y`` and ``X`` (for example ``"TZCYX"``).
-    channel
-        Always ``None`` or ``0``: only single-channel videos are analysed (a ``C`` axis of
-        length 1 is accepted).
     calibration
         Physical calibration (may be incomplete).
     """
 
     path: Path
     axes: str
-    channel: int | None = None
     calibration: Calibration = field(default_factory=Calibration)
 
 

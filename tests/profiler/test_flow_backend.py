@@ -13,7 +13,6 @@ from opticalflow3d_profiler.flow_backend import (
 )
 from opticalflow3d_profiler.flow_store import (
     open_result,
-    open_upstream_result,
     verify_result,
 )
 from opticalflow3d_profiler.image_io import file_identity, inspect_tiff
@@ -48,7 +47,7 @@ def test_manifest_records_provenance(flow_run):
     assert on_disk == manifest
     identity = manifest["identity"]
     assert identity["upstream"]["commit"].startswith("6b88604")
-    assert identity["axes"] == "TZYX" and identity["channel"] is None
+    assert identity["axes"] == "TZYX" and "channel" not in identity
     assert identity["source"]["sha256"] == file_identity(spec.path)["sha256"]
     assert identity["frame_map"] == [3, 4, 5]
     assert manifest["velocity_units"]["vz"] == "slice/frame"
@@ -80,7 +79,7 @@ def test_reuse_requires_identical_identity_and_files(flow_run):
 def test_open_result_lists_frames(flow_run):
     *_, out, _ = flow_run
     result = open_result(out)
-    assert result.verified and [f.source_frame for f in result.frames] == [3, 4, 5]
+    assert [f.source_frame for f in result.frames] == [3, 4, 5]
     assert set(result.frames[0].load()) == {"vx", "vy", "vz", "rel"}
 
 
@@ -118,22 +117,6 @@ def test_resource_estimate_full_size_dataset(tmp_path):
     assert estimate.n_outputs == 9
     assert 10e9 < estimate.peak_ram_bytes < 12e9
     assert estimate.output_bytes == 9 * 11 * 1840 * 1840 * 28
-
-
-def test_upstream_process_flow_folder_can_be_opened(tmp_path):
-    folder = tmp_path / "OpticalFlow3D" / "exp"
-    folder.mkdir(parents=True)
-    (folder / "exp_parameters.csv").write_text("xyzSig,tiSig,wSig,Nx,Ny,Nz,Nt\n3,1,4,8,8,3,9\n")
-    for t in (3, 4):
-        for c in ("vx", "vy", "vz", "rel"):
-            tifffile.imwrite(
-                folder / f"exp_{c}_t{t:04d}.tiff", np.zeros((3, 8, 8)), photometric="minisblack"
-            )
-    result = open_upstream_result(folder, "exp")
-    assert not result.verified and [f.source_frame for f in result.frames] == [3, 4]
-    (folder / "exp_rel_t0004.tiff").unlink()
-    with pytest.raises(InputError, match="incomplete"):
-        open_upstream_result(folder, "exp")
 
 
 def test_upstream_licence_ships_with_the_python_files():

@@ -1,11 +1,10 @@
 """Experimental metadata: conditions, replicates and stable field-of-view identities.
 
 A field of view is identified as in every MorphoBricks table by ``condition``,
-``biological_repeat``, ``technical_repeat`` and ``position_id``. The table comes either from
-a MorphoBricks experiment folder (:func:`~opticalflow3d_profiler.discovery.discover_experiment`,
-labels from the folder names) or from a metadata CSV with the same columns and
-``image_path``; labels are never parsed from file names. Each field of view also gets a
-deterministic, collision-safe ``fov_uid`` (its folder name in the run).
+``biological_repeat``, ``technical_repeat`` and ``position_id``. The table comes from a
+MorphoBricks experiment folder (:func:`~opticalflow3d_profiler.discovery.discover_experiment`:
+labels from the folder names, ``position_id`` from the image name). Each field of view also
+gets a deterministic, collision-safe ``fov_uid`` (its folder name in the run).
 """
 
 from __future__ import annotations
@@ -95,36 +94,6 @@ def validate_metadata(table: pd.DataFrame) -> pd.DataFrame:
     return table[keep].sort_values("fov_uid").reset_index(drop=True)
 
 
-def read_metadata(path: Path) -> pd.DataFrame:
-    """Read and validate a metadata CSV (all values read as text).
-
-    Relative ``image_path`` values are resolved against the CSV's folder.
-
-    Parameters
-    ----------
-    path
-        CSV file with the :data:`REQUIRED_COLUMNS`.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Validated table (see :func:`validate_metadata`).
-    """
-    table = pd.read_csv(path, dtype=str, keep_default_na=False)
-    if "input_path" in table.columns and "image_path" not in table.columns:
-        raise InputError("Rename the column 'input_path' to 'image_path' (MorphoBricks name).")
-    base = Path(path).resolve().parent
-    if "mask_path" in table.columns:
-        raise InputError("Masks are not used; remove the 'mask_path' column.")
-    for column in ("image_path",):
-        if column in table.columns:
-            table[column] = [
-                (base / v).as_posix() if v.strip() and not Path(v).is_absolute() else v
-                for v in table[column]
-            ]
-    return validate_metadata(table)
-
-
 def read_experiment_folder(root: Path) -> pd.DataFrame:
     """Discover a MorphoBricks experiment folder and validate it as a metadata table.
 
@@ -144,12 +113,3 @@ def replicate_counts(table: pd.DataFrame) -> pd.DataFrame:
             "fields_of_view": grouped["fov_uid"].nunique(),
         }
     ).reset_index()
-
-
-def repeat_column(table: pd.DataFrame) -> str:
-    """Return the column identifying biological repeats (``repeat_id`` when present).
-
-    ``repeat_id`` (written by :func:`~opticalflow3d_profiler.analysis.load_runs`, scoped to
-    its run unless the labels are declared shared) takes precedence over the raw label.
-    """
-    return "repeat_id" if "repeat_id" in table.columns else "biological_repeat"

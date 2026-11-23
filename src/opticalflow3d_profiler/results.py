@@ -33,10 +33,13 @@ DEPENDENCIES = (
     "scipy",
     "tifffile",
     "pandas",
-    "scikit-learn",
     "matplotlib",
     "ipywidgets",
     "natsort",
+    "tqdm",
+    "morphocoverage",
+    "umap-learn",
+    "scikit-learn",
 )
 
 

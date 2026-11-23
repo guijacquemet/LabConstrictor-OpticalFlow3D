@@ -51,7 +51,6 @@ def test_only_single_channel_videos_are_accepted():
     assert codes(check_channel("TZCYX", (15, 11, 2, 8, 8))) == {"multi_channel_not_supported"}
     assert not check_channel("TZCYX", (15, 11, 1, 8, 8))  # a C axis of length 1 is fine
     assert not check_channel("TZYX", (15, 11, 8, 8))
-    assert codes(check_channel("TZYX", (15, 11, 8, 8), 1)) == {"channel_out_of_range"}
 
 
 def test_too_few_frames_and_single_z():

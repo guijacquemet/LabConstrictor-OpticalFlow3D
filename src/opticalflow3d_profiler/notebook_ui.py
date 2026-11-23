@@ -217,7 +217,7 @@ class LoadStep:
         if self.session.header is None:
             raise InputError("Load the experiment first.")
         axes = self.axes.value.strip().upper()
-        spec = ImageSpec(self.session.header.path, axes, None, self.calibration())
+        spec = ImageSpec(self.session.header.path, axes, self.calibration())
         validate_image(spec, self.session.header)
         table = check_headers(self.session.metadata, axes)
         problems = header_problems(table)
@@ -355,7 +355,6 @@ class SettingsStep:
         foreground = ForegroundSpec(self.fg_mode.value, number(self.threshold.value))
         return RunSettings(
             spec.axes,
-            None,
             spec.calibration,
             flow,
             features,
@@ -402,7 +401,7 @@ def show_example(run: Path, row: pd.Series, settings: RunSettings) -> None:
     """Show the middle optical-flow output and the per-frame features of the example."""
     result = open_result(run / "flow" / str(row["fov_uid"]))
     frame = result.frames[len(result.frames) // 2]
-    spec = ImageSpec(Path(row["image_path"]), settings.axes, None)
+    spec = ImageSpec(Path(row["image_path"]), settings.axes)
     intensity = read_frames(spec, inspect_tiff(spec.path), [frame.source_frame])[0]
     z = intensity.shape[0] // 2
     step = max(4, intensity.shape[2] // 40)

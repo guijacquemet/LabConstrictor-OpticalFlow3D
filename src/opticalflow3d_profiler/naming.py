@@ -7,10 +7,9 @@ lower-case feature key, ``Nuclei__speed_xy_median``. Without a foreground the re
 whole image, the MorphoBricks compartment ``whole`` (``whole__speed_xy_median``); with an
 intensity-threshold foreground it is the user's object-set name (default ``Nuclei``).
 
-Per-FOV aggregates over time add the statistic to the feature key
-(``speed_xy_median_time_mean``). Quality-control columns (``qc_*``) are observation
-metadata, not features (MorphoFeature naming contract, principle 7): they keep their plain
-names and never enter a profile.
+The per-FOV time averages keep the per-frame column names. Quality-control columns
+(``qc_*``) are observation metadata, not features (MorphoFeature naming contract, principle
+7): they keep their plain names and are never given to MorphoCoverage as features.
 
 The token rules, reserved names and :func:`feature_column` are reimplemented from
 MorphoFeature ``src/morphofeature/naming.py`` (MIT licence, CellMigrationLab, commit
@@ -20,14 +19,13 @@ recorded in ``docs/morphobricks.md``); MorphoFeature is not a dependency.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .validation import InputError
 
 SEPARATOR = "__"
 WHOLE = "whole"
-TIME_STAT = "_time_"
 RESERVED_COMPARTMENTS = ("whole", "cell", "nucleus", "cytoplasm", "ring", "expanded_nucleus")
 RESERVED_NAMES = frozenset(
     {
@@ -41,7 +39,7 @@ _FEATURE_KEY = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 
 def is_name_token(text: object) -> bool:
-    """Return whether ``text`` can be a channel or object-set token.
+    """Return whether ``text`` can be an object-set token.
 
     A token starts with a letter and holds only letters, digits and single underscores, so it
     can never contain the separator.
@@ -50,9 +48,9 @@ def is_name_token(text: object) -> bool:
 
 
 def reserved_name(text: str) -> bool:
-    """Return whether a channel or object-set name is reserved (case-folded).
+    """Return whether an object-set name is reserved (case-folded).
 
-    MorphoBricks identity columns and compartment tokens cannot name a channel or a mask.
+    MorphoBricks identity columns and compartment tokens cannot name an object set.
     """
     return text.casefold() in RESERVED_NAMES | set(RESERVED_COMPARTMENTS)
 
@@ -74,20 +72,19 @@ def check_object_set(name: object) -> str:
     return text
 
 
-def feature_column(feature: str, object_set: str, channels: Sequence[str] = ()) -> str:
-    """Build ``{channel}__...__{object_set}__{feature}``.
+def feature_column(feature: str, object_set: str) -> str:
+    """Build ``{object_set}__{feature}``.
 
     Raises
     ------
     InputError
-        If a token or the feature key is malformed.
+        If the token or the feature key is malformed.
     """
     if not isinstance(feature, str) or not _FEATURE_KEY.match(feature):
         raise InputError(f"Feature key {feature!r} must be lower-case snake_case.")
-    for token in (*channels, object_set):
-        if not is_name_token(token):
-            raise InputError(f"Token {token!r} is not a valid channel or object-set name.")
-    return SEPARATOR.join((*channels, object_set, feature))
+    if not is_name_token(object_set):
+        raise InputError(f"Token {object_set!r} is not a valid object-set name.")
+    return SEPARATOR.join((object_set, feature))
 
 
 def feature_key(column: str) -> str:
@@ -101,7 +98,7 @@ def find_column(columns: Iterable[str], key: str) -> str | None:
     Raises
     ------
     InputError
-        When several columns share the key (two channels or object sets in one table).
+        When several columns share the key (two object sets in one table).
     """
     found = [c for c in columns if feature_key(c) == key]
     if len(found) > 1:

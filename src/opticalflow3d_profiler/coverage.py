@@ -8,9 +8,14 @@ MorphoCoverage's two input tables and its ``Setup``:
   with the MorphoBricks identity columns and the feature columns;
 - ``fovs``: the same fields of view, with ``repeat_group``. MorphoCoverage pairs biological
   repeats across conditions only by this confirmed column, never by folder labels. The user
-  confirms it in the design step. The repeat identity of :func:`~opticalflow3d_profiler.
-  analysis.load_runs` (``repeat_id``: scoped to its run unless the labels are declared
-  shared) is used as both the biological repeat and its group.
+  confirms the pairing in the design step, and a design in which no repeat holds both the
+  control and another condition is refused. The repeat identity of
+  :func:`~opticalflow3d_profiler.analysis.load_runs` (``repeat_id``: the folder label for one
+  run or shared labels, ``<run>/<label>`` otherwise) is the biological repeat and its group,
+  so the field-of-view key stays unique across runs.
+
+``run_report`` also writes ``design.json``: the design, the declared features, the runs and
+the MorphoCoverage version and commit, so the report can be reproduced.
 
 Only biological features (and, when chosen, the experimental axial ones) are declared as
 features; ``qc_*`` columns are never phenotype. A feature undefined in every field of view is
@@ -19,16 +24,18 @@ left out and listed, never filled.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from .analysis import FeatureSet
+from .feature_dictionary import AXIAL, BIOLOGICAL, FeatureDef
 from .naming import find_column
 from .progress import Tracker
-from .temporal_features import pca_eligible
+from .results import now, write_json
 from .validation import InputError
 
 KEY = ("condition", "biological_repeat", "technical_repeat", "position_id")
@@ -44,7 +51,8 @@ class Design:
     control
         The control condition every other condition is compared with.
     readout
-        The main feature column (the report's readout; every feature is tested alike).
+        The main feature column (the report's readout; every feature is tested alike). It is
+        always declared, an experimental axial one included.
     repeats_paired
         The user's confirmation that a biological-repeat label means the same biological
         repeat in every condition (MorphoCoverage's ``repeat_group``). Required.
@@ -71,6 +79,17 @@ class CoverageInput:
     notes: list[str] = field(default_factory=list)
 
 
+def is_declared_feature(definition: FeatureDef, include_axial: bool) -> bool:
+    """Return whether a column is given to MorphoCoverage as a feature.
+
+    Biological readouts always; experimental axial (Z-dependent) ones only when chosen.
+    Orientation descriptors and quality control never.
+    """
+    if definition.applicability == BIOLOGICAL:
+        return True
+    return include_axial and definition.applicability == AXIAL
+
+
 def default_readout(features: FeatureSet) -> str:
     """Return the median speed column of the table (3D when present, else XY)."""
     columns = list(features.table.columns)
@@ -84,7 +103,9 @@ def feature_columns(features: FeatureSet, include_axial: bool) -> tuple[list[str
     """Return the declared feature columns and those left out as undefined everywhere."""
     table = features.table
     chosen = [
-        d.name for d in features.fov_defs if pca_eligible(d, include_axial) and d.name in table
+        d.name
+        for d in features.fov_defs
+        if is_declared_feature(d, include_axial) and d.name in table
     ]
     defined = [c for c in chosen if pd.to_numeric(table[c], errors="coerce").notna().any()]
     return defined, [c for c in chosen if c not in defined]
@@ -111,8 +132,11 @@ def coverage_input(features: FeatureSet, design: Design) -> CoverageInput:
     if len(conditions) < 2:
         raise InputError("Only one condition: nothing to compare with the control.")
     declared, undefined = feature_columns(features, design.include_axial)
-    if design.readout not in declared:
-        raise InputError(f"The readout '{design.readout}' is not a declared feature.")
+    candidates, _ = feature_columns(features, include_axial=True)
+    if design.readout not in candidates:
+        raise InputError(f"The readout '{design.readout}' is not a feature with values.")
+    if design.readout not in declared:  # an axial readout is declared even when not chosen
+        declared.append(design.readout)
     repeat = "repeat_id" if "repeat_id" in table.columns else "biological_repeat"
     keys = table[list(KEY)].astype(str).copy()
     keys["biological_repeat"] = table[repeat].astype(str)
@@ -121,10 +145,35 @@ def coverage_input(features: FeatureSet, design: Design) -> CoverageInput:
     ).reset_index(drop=True)
     fovs = keys.reset_index(drop=True)
     fovs["repeat_group"] = fovs["biological_repeat"]
+    unpaired = unpaired_conditions(fovs, design.control)
+    if unpaired:
+        raise InputError(
+            f"No biological repeat holds both the control and {', '.join(unpaired)}. With "
+            "several runs, tick 'Repeat labels mean the same biological repeat in every run' "
+            "when the labels are shared."
+        )
     notes = [f"Undefined in every field of view, not declared: {', '.join(undefined)}."] * bool(
         undefined
     )
     return CoverageInput(objects, fovs, declared, notes)
+
+
+def unpaired_conditions(fovs: pd.DataFrame, control: str) -> list[str]:
+    """Return the conditions with no repeat group in common with the control."""
+    groups = fovs.groupby("condition")["repeat_group"].apply(set)
+    return [c for c in groups.index if c != control and not groups[c] & groups[control]]
+
+
+def morphocoverage_identity() -> dict[str, str | None]:
+    """Return the installed MorphoCoverage version and, from a git install, its commit."""
+    from importlib import metadata
+
+    try:
+        dist = metadata.distribution("morphocoverage")
+    except metadata.PackageNotFoundError:
+        return {"version": None, "commit": None}
+    direct = json.loads(dist.read_text("direct_url.json") or "{}")
+    return {"version": dist.version, "commit": direct.get("vcs_info", {}).get("commit_id")}
 
 
 def run_report(
@@ -175,6 +224,18 @@ def run_report(
     out_dir.mkdir(parents=True)
     data.objects.to_csv(out_dir / "morphocoverage_objects.csv", index=False)
     data.fovs.to_csv(out_dir / "morphocoverage_fovs.csv", index=False)
+    write_json(
+        out_dir / "design.json",
+        {
+            "created": now(),
+            "design": asdict(design),
+            "observation_unit": "fov",
+            "features": data.features,
+            "notes": data.notes,
+            "runs": features.sources,
+            "morphocoverage": morphocoverage_identity(),
+        },
+    )
     path = html_report(result, scan.objects, scan.fovs, out_dir, title=REPORT_TITLE)
     stage.update("report written")
     stage.close()

@@ -49,8 +49,8 @@ class RunSettings:
 
     Attributes
     ----------
-    axes, channel
-        Confirmed axes and channel of every input file.
+    axes
+        Confirmed axes of every input file (single-channel videos).
     calibration
         Calibration of every input (one acquisition setting per run).
     flow, features, foreground
@@ -62,7 +62,6 @@ class RunSettings:
     """
 
     axes: str
-    channel: int | None
     calibration: Calibration
     flow: FlowParameters = field(default_factory=FlowParameters)
     features: FeatureSettings = field(default_factory=FeatureSettings)
@@ -187,7 +186,7 @@ def frame_rows(
         features.put(
             "qc_brightness_change_per_frame",
             recorded.get("brightness_change_per_frame"),
-            "not recorded (optical flow from an external or older result)",
+            "not recorded (optical flow from an older result)",
         )
         row: dict[str, object] = {
             "fov_uid": result.name,
@@ -275,9 +274,7 @@ def process_fov(
         "message": "",
     }
     try:
-        spec = ImageSpec(
-            Path(row["image_path"]), settings.axes, settings.channel, settings.calibration
-        )
+        spec = ImageSpec(Path(row["image_path"]), settings.axes, settings.calibration)
         header = inspect_tiff(spec.path)
         warnings = calibration_warnings(header, settings.calibration)
         dims = dimensions(spec, header)

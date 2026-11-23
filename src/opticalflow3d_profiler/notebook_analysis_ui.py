@@ -119,6 +119,7 @@ class DesignStep:
         self.session = session
         self.control = widgets.Dropdown(description="Control", style=STYLE)
         self.readout = widgets.Dropdown(description="Readout", style=STYLE, layout=WIDE)
+        # The readout lists every feature with values; it is declared even when axial.
         self.axial = widgets.Checkbox(description="Also include experimental axial features")
         self.paired = widgets.Checkbox(
             description="A biological-repeat label is the same repeat in every condition",
@@ -162,7 +163,7 @@ class DesignStep:
         """Offer the conditions and the feature columns of the loaded results."""
         features = self.features()
         self.control.options = sorted(features.table["condition"].unique())
-        declared, _ = feature_columns(features, self.axial.value)
+        declared, _ = feature_columns(features, include_axial=True)
         self.readout.options = declared
         self.readout.value = default_readout(features)
         print("Choose the control and the readout, then confirm the design.")

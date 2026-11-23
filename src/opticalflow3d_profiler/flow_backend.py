@@ -199,7 +199,7 @@ def flow_identity(
     Returns
     -------
     dict
-        Input content hash, confirmed axes, channel, dimensions, parameters, upstream
+        Input content hash, confirmed axes, dimensions, parameters, upstream
         identity and the output-to-source frame map. Calibration is not part of it: it
         does not change the saved velocities, which stay in voxels per frame.
     """
@@ -207,7 +207,6 @@ def flow_identity(
     return {
         "source": {"sha256": source["sha256"], "size_bytes": source["size_bytes"]},
         "axes": spec.axes.upper(),
-        "channel": spec.channel,
         "dimensions": dims,
         "dtype": header.dtype,
         "parameters": to_record(params),

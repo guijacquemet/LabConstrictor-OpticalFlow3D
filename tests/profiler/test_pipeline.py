@@ -25,7 +25,6 @@ SPEED = "Nuclei__speed_xy_median"
 def settings(**changes):
     base = dict(
         axes="TZYX",
-        channel=None,
         calibration=CAL,
         features=FeatureSettings(reliability_value=1e-3, region_size_px=24, min_region_voxels=20),
         foreground=ForegroundSpec(mode="threshold", threshold=300.0),
@@ -141,41 +140,18 @@ def test_morphocoverage_report_from_the_per_fov_table(experiment):
     data = coverage_input(features, Design("ctrl", SPEED, repeats_paired=True))
     assert len(data.objects) == 6 and not any(c.startswith("qc_") for c in data.features)
     assert (data.fovs["repeat_group"] == data.fovs["biological_repeat"]).all()
-    assert data.fovs["biological_repeat"].str.startswith("run1/").all()  # run-scoped repeats
+    assert set(data.fovs["repeat_group"]) == {"r1", "r2", "r3"}  # one run: the folder labels
     out = run / "analysis" / "report-1"
     path, result, _ = run_report(features, Design("ctrl", SPEED, repeats_paired=True), out)
     assert path == out / "report.html" and path.stat().st_size > 100_000
     row = result.discovery.tests.set_index("feature").loc[SPEED]
     assert row["observations"] == 3 and row["repeats"] == 3 and row["d"] > 0
     assert (out / "morphocoverage_objects.csv").is_file()
+    record = json.loads((out / "design.json").read_text())
+    assert record["design"]["control"] == "ctrl" and record["observation_unit"] == "fov"
+    assert record["morphocoverage"]["version"]
     with pytest.raises(InputError, match="never overwritten"):
         run_report(features, Design("ctrl", SPEED, repeats_paired=True), out)
-
-
-def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
-    from opticalflow3d_profiler._upstream.calc_flow import process_flow
-    from opticalflow3d_profiler.external import external_features
-
-    movie = SyntheticMovie(shape=(8, 11, 40, 40), n_nuclei=4, velocity=(0, 0, 0.5))
-    tifffile.imwrite(tmp_path / "exp.tif", render(movie), imagej=True, metadata={"axes": "TZYX"})
-    process_flow(str(tmp_path), "exp", "OneTif", 3)
-    folder = tmp_path / "OpticalFlow3D" / "exp"
-    row = {
-        "position_id": "p",
-        "condition": "c",
-        "biological_repeat": "r",
-        "technical_repeat": "t",
-        "image_path": "exp.tif",
-    }
-    run = create_run(tmp_path, "ext")
-    manifest = external_features(folder, "exp", row, settings(foreground=ForegroundSpec()), run)
-    frames = pd.read_csv(run / "features" / "features_per_frame.csv")
-    assert sorted(frames["t"]) == [3, 4]
-    assert "whole__speed_xy_median" in frames.columns  # no foreground: whole image
-    assert manifest["fovs"][0]["flow_origin"].startswith("external, not verified")
-    assert "qc_foreground_intensity_mean" not in frames.columns  # intensity QC is opt-in
-    with pytest.raises(InputError, match="needs the original image"):
-        external_features(folder, "exp", row, settings(), create_run(tmp_path, "ext2"))
 
 
 def _copy_run(run, target, prefix, change=None):
@@ -282,3 +258,20 @@ def test_progress_is_reported_per_fov_flow_window_and_frame(experiment, tmp_path
     assert names == ["Fields", "Optical", "Features"]
     assert all(s["done"] == s["total"] for s in recorder.stages)
     assert recorder.stages[1]["total"] == 3  # 9 frames, tSig 1: 3 flow windows
+
+
+def test_unpaired_runs_are_refused_for_morphocoverage(experiment, tmp_path):
+    from opticalflow3d_profiler.coverage import Design, coverage_input
+
+    _, _, run, _ = experiment
+    ctrl = _copy_run(run, tmp_path / "c", "c-")
+    drug = _copy_run(run, tmp_path / "d", "d-")
+    for folder, keep in ((ctrl, "ctrl"), (drug, "drug")):
+        table = folder / "features" / "features_per_fov.csv"
+        data = pd.read_csv(table, dtype=str, keep_default_na=False)
+        data[data["condition"] == keep].to_csv(table, index=False)
+    scoped = load_runs([ctrl, drug])
+    with pytest.raises(InputError, match="No biological repeat holds both"):
+        coverage_input(scoped, Design("ctrl", SPEED, repeats_paired=True))
+    shared = load_runs([ctrl, drug], shared_repeat_labels=True)
+    assert len(coverage_input(shared, Design("ctrl", SPEED, repeats_paired=True)).objects) == 6

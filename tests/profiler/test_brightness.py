@@ -94,7 +94,6 @@ def test_brightness_qc_column_and_warning(tmp_path):
     )
     settings = RunSettings(
         "TZYX",
-        None,
         Calibration(),
         FlowParameters(mode="xyz"),
         features=FeatureSettings(reliability_value=1e-3, region_size_px=16, min_region_voxels=10),
