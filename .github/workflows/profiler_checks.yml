@@ -1,0 +1,28 @@
+name: Profiler checks
+
+# Ruff, code-size rules and the pytest suite of the OpticalFlow3D Profiler package
+# (src/opticalflow3d_profiler, tests/profiler). Separate from the template's own workflows.
+on:
+  pull_request:
+    paths: ['src/**', 'tests/profiler/**', 'tools/**', 'notebooks/**', '.github/workflows/profiler_checks.yml']
+  push:
+    branches: [main]
+    paths: ['src/**', 'tests/profiler/**', 'tools/**', 'notebooks/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4
+        with:
+          python-version: '3.11'
+      - name: Install the application dependencies and the check tools
+        run: pip install -r tools/requirements-checks.txt
+      - name: Ruff, code rules and tests
+        run: python tools/check_profiler.py

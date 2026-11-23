@@ -1,0 +1,9 @@
+# Dependencies of the profiler checks (CI and local). The runtime pins must match
+# notebooks/OpticalFlow3D_Profiler/requirements.yaml.
+numpy==2.2.6
+scipy==1.15.3
+tifffile==2025.5.10
+pandas==2.2.3
+natsort==8.4.0
+pytest==9.1.1
+ruff==0.15.20

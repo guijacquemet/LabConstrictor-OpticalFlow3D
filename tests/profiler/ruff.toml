@@ -1,0 +1,6 @@
+# Ruff configuration of the OpticalFlow3D Profiler tests: the package rules without the
+# docstring and annotation requirements (tests are exempt, as in MorphoBricks).
+extend = "../../src/ruff.toml"
+
+[lint]
+ignore = ["D", "ANN", "I002", "D105", "D107"]

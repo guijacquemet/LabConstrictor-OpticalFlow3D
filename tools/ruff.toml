@@ -1,0 +1,2 @@
+# Ruff configuration of the profiler tools: the package rules.
+extend = "../src/ruff.toml"
