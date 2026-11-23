@@ -80,3 +80,8 @@ def test_intensity_columns_are_opt_in_in_the_dictionary():
     names = {d.name for d in frame_dictionary("xy")}
     assert "qc_foreground_intensity_mean" not in names
     assert "qc_foreground_intensity_mean" in {d.name for d in frame_dictionary("xy", True)}
+
+
+def test_metadata_identity_whitespace_is_refused_not_trimmed():
+    with pytest.raises(InputError, match="invalid_name"):
+        validate_metadata(pd.DataFrame([metadata(condition="ctrl ")]))

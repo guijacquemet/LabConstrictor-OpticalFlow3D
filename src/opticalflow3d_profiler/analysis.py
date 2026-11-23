@@ -6,6 +6,7 @@ units and speed mode, so that a column means the same thing in every row.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ import pandas as pd
 
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
+from .naming import SEPARATOR, feature_key
 from .validation import InputError
 
 
@@ -61,13 +63,30 @@ def _differences(first: dict[str, object], other: dict[str, object]) -> list[str
     return found
 
 
-def _read_table(run: Path) -> pd.DataFrame:
+def run_labels(runs: list[Path]) -> dict[Path, str]:
+    """Return a label per run: its folder name, made unique with a hash of its full path.
+
+    Two runs with the same folder name in different places (``/batchA/run-1`` and
+    ``/batchB/run-1``) get different labels, so their repeats are never merged by accident.
+    """
+    names = [r.name for r in runs]
+    labels = {}
+    for run in runs:
+        if names.count(run.name) == 1:
+            labels[run] = run.name
+        else:
+            digest = hashlib.sha256(str(run.resolve()).encode("utf-8")).hexdigest()[:8]
+            labels[run] = f"{run.name}-{digest}"
+    return labels
+
+
+def _read_table(run: Path, label: str) -> pd.DataFrame:
     """Read one run's per-FOV table with metadata as text."""
     text = {c: str for c in METADATA_COLUMNS}
     table = pd.read_csv(
         run / "features" / "features_per_fov.csv", dtype=text, keep_default_na=False, na_values=[""]
     )
-    table.insert(1, "run", run.name)
+    table.insert(1, "run", label)
     return table
 
 
@@ -80,8 +99,9 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
         Run folders written by the pipeline.
     shared_repeat_labels
         False (default): with several runs, a biological-repeat label identifies a repeat
-        only within its run (``repeat_id = <run>/<label>``), so ``r1`` of two runs counts as
-        two repeats. True: the same label in different runs is the same biological repeat
+        only within its run (``repeat_id = <run label>/<label>``, the run label unique even
+        for runs with the same folder name: :func:`run_labels`), so ``r1`` of two runs counts
+        as two repeats. True: the same label in different runs is the same biological repeat
         (for example the control and treatment of one experiment day processed as separate
         runs). With one run, ``repeat_id`` is the label itself.
 
@@ -100,6 +120,7 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
     if not runs:
         raise InputError("No run folder was given.")
     tables, dictionary, reference = [], None, None
+    labels = run_labels(runs)
     for run in runs:
         dict_path = run / "features" / "feature_dictionary.json"
         if not (run / "features" / "features_per_fov.csv").is_file() or not dict_path.is_file():
@@ -125,8 +146,16 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
                     f"({', '.join(changed)}); its features are not comparable. "
                     "Re-extract the features with the same settings."
                 )
-        tables.append(_read_table(run))
+        tables.append(_read_table(run, labels[run]))
     combined = pd.concat(tables, ignore_index=True)
+    keys = [feature_key(c) for c in combined.columns if SEPARATOR in c]
+    repeated = sorted({k for k in keys if keys.count(k) > 1})
+    if repeated:
+        raise InputError(
+            "Several columns share a feature key (two object sets in one table): "
+            + ", ".join(repeated)
+            + ". Combine runs extracted with the same foreground name."
+        )
     duplicated = combined["fov_uid"][combined["fov_uid"].duplicated()].unique()
     if len(duplicated):
         raise InputError("The same field of view appears in several runs: " + ", ".join(duplicated))

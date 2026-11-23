@@ -219,7 +219,15 @@ def _put_angles(row: FeatureRow, vx: np.ndarray, vy: np.ndarray, settings: Featu
     mean_cos, mean_sin = float(np.mean(np.cos(theta))), float(np.mean(np.sin(theta)))
     resultant = float(np.hypot(mean_cos, mean_sin))
     dominant = float(np.arctan2(mean_sin, mean_cos)) if resultant >= 1e-12 else None
-    row.put("xy_angular_entropy", _angular_entropy(theta, dominant, settings.angle_bins))
+    anchor = _entropy_anchor(theta, dominant, settings.angle_bins)
+    if anchor is None:
+        row.put(
+            "xy_angular_entropy",
+            None,
+            "no orientation-free bin anchor (every circular moment dividing angle_bins is zero)",
+        )
+    else:
+        row.put("xy_angular_entropy", _angular_entropy(theta, anchor, settings.angle_bins))
     row.put("xy_angular_dispersion", 1.0 - resultant)
     if dominant is None:
         row.put("xy_aligned_fraction", None, "no dominant direction (mean resultant is zero)")
@@ -230,15 +238,32 @@ def _put_angles(row: FeatureRow, vx: np.ndarray, vy: np.ndarray, settings: Featu
     row.put("xy_dominant_direction_deg", float(np.rad2deg(dominant)))
 
 
-def _angular_entropy(theta: np.ndarray, dominant: float | None, bins: int) -> float:
-    """Return the normalised entropy of directions, with one bin centred on ``dominant``.
+def _entropy_anchor(theta: np.ndarray, dominant: float | None, bins: int) -> float | None:
+    """Return the direction one entropy bin is centred on, or None when none is defined.
 
-    Centring the bins on the dominant direction makes the value independent of the image
-    orientation (rotating every vector leaves it unchanged). Without a dominant direction
-    the bins start at -π.
+    The dominant direction (first circular moment) when there is one. Otherwise the first
+    non-zero circular moment of order ``k`` among the divisors of ``bins``,
+    ``arg(mean(exp(i k θ))) / k``: it turns with the vectors up to a multiple of ``2π / k``,
+    which is a whole number of bins, so the entropy does not change when every vector is
+    rotated (for example two opposite streams, whose first moment is zero).
+    """
+    if dominant is not None:
+        return dominant
+    for k in (d for d in range(2, bins + 1) if bins % d == 0):
+        moment = complex(np.mean(np.exp(1j * k * theta)))
+        if abs(moment) >= 1e-12:
+            return float(np.angle(moment)) / k
+    return None
+
+
+def _angular_entropy(theta: np.ndarray, anchor: float, bins: int) -> float:
+    """Return the normalised entropy of directions, with one bin centred on ``anchor``.
+
+    Centring the bins on a direction that turns with the vectors (:func:`_entropy_anchor`)
+    makes the value independent of the image orientation.
     """
     width = 2 * np.pi / bins
-    origin = dominant - width / 2 if dominant is not None else -np.pi
+    origin = anchor - width / 2
     counts = np.bincount(
         np.floor(np.mod(theta - origin, 2 * np.pi) / width).astype(int) % bins, minlength=bins
     )

@@ -117,17 +117,24 @@ def test_features_recomputed_from_verified_flow(experiment):
     assert not any((new / "flow").iterdir())  # nothing recomputed
 
 
-def test_flow_with_other_parameters_is_not_reused(experiment):
+def test_flow_with_other_parameters_is_recomputed_not_reused(experiment):
+    import hashlib
+
     root, metadata, run, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    old = run / "flow" / one["fov_uid"].iloc[0]
+    before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in old.iterdir()}
     new = create_run(root / "results", "run3")
     manifest = run_experiment(
-        metadata[metadata["position_id"] != "broken"].iloc[:1],
-        settings(flow=FlowParameters(mode="xyz", w_sig=2)),
-        new,
-        reuse_from=run,
+        one, settings(flow=FlowParameters(mode="xyz", w_sig=2)), new, reuse_from=run
     )
-    assert manifest["fovs"][0]["status"] == "failed"
-    assert "cannot be reused" in manifest["fovs"][0]["message"]
+    status = manifest["fovs"][0]
+    assert status["status"] == "complete"
+    assert status["flow_origin"].startswith("computed (earlier flow in")
+    assert "parameters" in status["flow_origin"]
+    assert (new / "flow" / one["fov_uid"].iloc[0] / "flow_manifest.json").is_file()
+    after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in old.iterdir()}
+    assert before == after  # the earlier result is untouched
 
 
 def test_morphocoverage_report_from_the_per_fov_table(experiment):
@@ -275,3 +282,55 @@ def test_unpaired_runs_are_refused_for_morphocoverage(experiment, tmp_path):
         coverage_input(scoped, Design("ctrl", SPEED, repeats_paired=True))
     shared = load_runs([ctrl, drug], shared_repeat_labels=True)
     assert len(coverage_input(shared, Design("ctrl", SPEED, repeats_paired=True)).objects) == 6
+
+
+def test_runs_with_the_same_folder_name_are_never_paired(experiment, tmp_path):
+    from opticalflow3d_profiler.coverage import Design, coverage_input
+
+    _, _, run, _ = experiment
+    ctrl = _copy_run(run, tmp_path / "batchA" / "run1", "a-")
+    drug = _copy_run(run, tmp_path / "batchB" / "run1", "b-")
+    for folder, keep in ((ctrl, "ctrl"), (drug, "drug")):
+        table = folder / "features" / "features_per_fov.csv"
+        data = pd.read_csv(table, dtype=str, keep_default_na=False)
+        data[data["condition"] == keep].to_csv(table, index=False)
+    combined = load_runs([ctrl, drug])
+    assert combined.table["run"].nunique() == 2  # same folder name, different labels
+    with pytest.raises(InputError, match="No biological repeat holds both"):
+        coverage_input(combined, Design("ctrl", SPEED, repeats_paired=True))
+
+
+def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
+    import hashlib
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    run = create_run(tmp_path, "flow-only")
+    run_experiment(one, settings(), run, flow_only=True)
+    digests = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in (run / "run_manifest.json", run / "fovs.csv")
+    }
+    for flow_only in (True, False):
+        with pytest.raises(InputError, match="never run twice"):
+            run_experiment(one, settings(), run, flow_only=flow_only, reuse_from=run)
+    assert digests == {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in (run / "run_manifest.json", run / "fovs.csv")
+    }
+
+
+def test_default_readout_is_a_feature_with_values(experiment):
+    from dataclasses import replace as replace_set
+
+    from opticalflow3d_profiler.coverage import default_readout
+    from opticalflow3d_profiler.feature_dictionary import AXIAL, FeatureDef
+
+    _, _, run, _ = experiment
+    features = load_runs([run])
+    assert default_readout(features) == SPEED
+    speed_3d = "Nuclei__speed_3d_median"  # 3D speed without full calibration: all NaN
+    table = features.table.assign(**{speed_3d: float("nan")})
+    axial = FeatureDef(speed_3d, "magnitude", "", "", "lateral", "fov", "", AXIAL, "")
+    undefined = replace_set(features, table=table, fov_defs=[axial, *features.fov_defs])
+    assert default_readout(undefined) == SPEED

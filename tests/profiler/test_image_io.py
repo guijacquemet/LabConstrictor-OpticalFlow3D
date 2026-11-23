@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import tifffile
 from opticalflow3d_profiler.config import ImageSpec
-from opticalflow3d_profiler.image_io import file_identity, inspect_tiff, read_frames
+from opticalflow3d_profiler.image_io import file_identity, inspect_tiff, read_frames, validate_image
 from opticalflow3d_profiler.validation import InputError
 
 
@@ -116,3 +116,34 @@ def test_rgb_samples_are_refused(tmp_path):
     header = inspect_tiff(path)
     with pytest.raises(InputError, match="samples per pixel"):
         read_frames(ImageSpec(path, "TZYX"), header, [0])
+
+
+def test_axes_named_by_the_header_cannot_be_reinterpreted(tmp_path):
+    path = tmp_path / "tzyx.ome.tif"
+    data = np.arange(11 * 7 * 4 * 4, dtype=np.uint16).reshape(11, 7, 4, 4)
+    tifffile.imwrite(path, data, ome=True, photometric="minisblack", metadata={"axes": "TZYX"})
+    header = inspect_tiff(path)
+    assert header.header_axes == "TZYX" and not header.axes_ambiguous
+    with pytest.raises(InputError, match="axes_contradict_header"):
+        read_frames(ImageSpec(path, "ZTYX"), header, [0])  # Z planes would be read as time
+    assert read_frames(ImageSpec(path, "TZYX"), header, [2]).shape == (1, 7, 4, 4)
+    tcyx = tmp_path / "tcyx.tif"  # three channels, no Z
+    tifffile.imwrite(
+        tcyx, np.zeros((7, 3, 8, 8), np.uint16), imagej=True, metadata={"axes": "TCYX"}
+    )
+    with pytest.raises(InputError, match="axes_contradict_header"):
+        validate_image(ImageSpec(tcyx, "TZYX"), inspect_tiff(tcyx))  # channels read as Z
+
+
+def test_ome_values_without_units_are_flagged(tmp_path):
+    path = tmp_path / "nounit.ome.tif"
+    tifffile.imwrite(
+        path,
+        np.zeros((7, 3, 8, 8), np.uint16),
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "TZYX", "TimeIncrement": 30.0, "PhysicalSizeX": 0.5},
+    )
+    header = inspect_tiff(path)
+    assert header.calibration_suggestion.frame_interval == pytest.approx(0.5)  # 30 s, OME default
+    assert any("TimeIncrement (unit not stated: OME default s)" in n for n in header.notes)

@@ -127,3 +127,68 @@ def test_upstream_licence_ships_with_the_python_files():
     folder = Path(_license.__file__).parent
     assert (folder / "LICENSE").read_text() == _license.LICENSE_TEXT
     assert "Howard Hughes Medical Institute" in _license.LICENSE_TEXT
+
+
+def test_correction_code_identity_invalidates_cached_corrected_flow(flow_run, monkeypatch):
+    from opticalflow3d_profiler import flow_backend
+
+    spec, header, _, _, _ = flow_run
+    source = file_identity(spec.path)
+    plain = FlowParameters(mode="xyz")
+    corrected = FlowParameters(mode="xyz", brightness_equalisation="global_mean")
+    before = flow_backend.flow_identity(spec, header, corrected, source)
+    assert before["brightness_correction"]["time_series_sha256"]
+    assert "brightness_correction" not in flow_backend.flow_identity(spec, header, plain, source)
+    monkeypatch.setattr(
+        flow_backend, "implementation_identity", lambda: {"version": "other", "commit": "x"}
+    )
+    after = flow_backend.flow_identity(spec, header, corrected, source)
+    assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
+
+
+def test_a_failing_window_closes_progress_and_removes_the_partial_folder(
+    tmp_path, imagej_file, monkeypatch
+):
+    from opticalflow3d_profiler import flow_backend
+    from opticalflow3d_profiler.progress import Stage, Tracker
+
+    closed = []
+
+    class Recording(Tracker):
+        def stage(self, description, total, nested=False):
+            class Closing(Stage):
+                def close(self):
+                    closed.append(description)
+
+            return Closing()
+
+    calls = {"n": 0}
+    original = flow_backend.flow_window
+
+    def failing(window, params):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("disk full")
+        return original(window, params)
+
+    monkeypatch.setattr(flow_backend, "flow_window", failing)
+    path, _ = imagej_file
+    out = tmp_path / "flow" / "f"
+    with pytest.raises(RuntimeError, match="disk full"):
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"), out, "f",
+                 tracker=Recording())  # fmt: skip
+    assert closed == ["Optical flow f"]
+    assert not out.exists() and not list((tmp_path / "flow").glob("f.partial-*"))
+
+
+def test_a_manifest_missing_a_planned_output_is_refused(flow_run):
+    spec, header, _, out, manifest = flow_run
+    edited = json.loads((out / "flow_manifest.json").read_text())
+    edited["outputs"] = edited["outputs"][:1]  # files and hashes of the kept output are intact
+    from opticalflow3d_profiler.flow_backend import identity_key
+
+    edited["identity_key"] = identity_key(edited["identity"])
+    (out / "flow_manifest.json").write_text(json.dumps(edited))
+    assert any("not the planned [3, 4, 5]" in p for p in verify_result(out))
+    with pytest.raises(InputError):
+        open_result(out)

@@ -150,23 +150,25 @@ def export_qc_figures(
     frames = pd.read_csv(table) if table.exists() else None
     written: list[Path] = []
     stage = (tracker or Tracker()).stage("QC figures", len(done))
-    for status in done.to_dict("records"):
-        written += export_fov(run_dir, status, settings, z)
-        if frames is not None:
-            own = frames[frames["fov_uid"] == status["fov_uid"]].sort_values("t")
-            path = run_dir / "qc" / status["fov_uid"] / "features_over_time.png"
-            figures.save(
-                figures.feature_timeseries(
-                    own,
-                    _plotted(own),
-                    "t",
-                ),
-                path,
-                dpi=QC_DPI,
-            )
-            written.append(path)
-        stage.update(str(status["position_id"]))
-    stage.close()
+    try:
+        for status in done.to_dict("records"):
+            written += export_fov(run_dir, status, settings, z)
+            if frames is not None:
+                own = frames[frames["fov_uid"] == status["fov_uid"]].sort_values("t")
+                path = run_dir / "qc" / status["fov_uid"] / "features_over_time.png"
+                figures.save(
+                    figures.feature_timeseries(
+                        own,
+                        _plotted(own),
+                        "t",
+                    ),
+                    path,
+                    dpi=QC_DPI,
+                )
+                written.append(path)
+            stage.update(str(status["position_id"]))
+    finally:
+        stage.close()
     if frames is not None:
         path = run_dir / "qc" / "feature_histograms.png"
         figures.save(

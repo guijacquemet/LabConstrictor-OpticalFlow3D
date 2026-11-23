@@ -132,7 +132,12 @@ def _header_calibration(tif: tifffile.TiffFile) -> tuple[Calibration, list[str]]
 
 
 def _ome_calibration(xml_text: str) -> tuple[Calibration, list[str]]:
-    """Read PhysicalSize and TimeIncrement of the first OME image."""
+    """Read PhysicalSize and TimeIncrement of the first OME image.
+
+    A missing unit takes the OME schema's default (µm for sizes, s for the time increment),
+    as MorphoBricks preprocessing reads it; every value read this way is named in a note, so
+    the user sees it before confirming the calibration.
+    """
     root = ET.fromstring(xml_text)
     pixels = next((el for el in root.iter() if el.tag.endswith("Pixels")), None)
     if pixels is None:
@@ -156,6 +161,22 @@ def _ome_calibration(xml_text: str) -> tuple[Calibration, list[str]]:
         "TimeIncrement",
         notes,
     )
+    defaults = [
+        f"{name} (unit not stated: OME default {unit})"
+        for name, unit, value in (
+            ("PhysicalSizeX", "µm", sizes[0]),
+            ("PhysicalSizeY", "µm", sizes[1]),
+            ("PhysicalSizeZ", "µm", sizes[2]),
+            ("TimeIncrement", "s", interval),
+        )
+        if value is not None and pixels.get(f"{name}Unit") is None
+    ]
+    if defaults:
+        notes.append(
+            "Units taken from the OME schema defaults: "
+            + ", ".join(defaults)
+            + ". Check these values before confirming."
+        )
     return Calibration(*sizes, interval, source="header (OME)"), notes
 
 
@@ -216,11 +237,18 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
     Raises
     ------
     InputError
-        When the axes are invalid, the file has several channels or series, or Y and X are
-        not the last two axes (pages must be XY planes).
+        When the axes are invalid or contradict axes the header names, the file has several
+        channels or series, or Y and X are not the last two axes (pages must be XY planes).
     """
     issues = check_axes(spec.axes, header.shape) + check_channel(spec.axes, header.shape)
     raise_for_errors(issues)
+    if not header.axes_ambiguous and spec.axes.strip().upper() != header.header_axes:
+        raise InputError(
+            f"axes_contradict_header: {header.path.name} names its axes {header.header_axes} "
+            f"in its header, but {spec.axes.strip().upper()} was confirmed. Axes the header names "
+            "are never reinterpreted (Z planes read as time points, or channels as Z, would give "
+            "false velocities); confirm the header's axes or fix the file."
+        )
     if header.n_series > 1:
         raise InputError(
             f"multiple_series: {header.path.name} holds {header.n_series} image series "

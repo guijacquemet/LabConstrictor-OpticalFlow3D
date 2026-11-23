@@ -24,7 +24,6 @@ left out and listed, never filled.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,7 +34,7 @@ from .analysis import FeatureSet
 from .feature_dictionary import AXIAL, BIOLOGICAL, FeatureDef
 from .naming import find_column
 from .progress import Tracker
-from .results import now, write_json
+from .results import distribution_identity, now, write_json
 from .validation import InputError
 
 KEY = ("condition", "biological_repeat", "technical_repeat", "position_id")
@@ -91,12 +90,24 @@ def is_declared_feature(definition: FeatureDef, include_axial: bool) -> bool:
 
 
 def default_readout(features: FeatureSet) -> str:
-    """Return the median speed column of the table (3D when present, else XY)."""
-    columns = list(features.table.columns)
-    found = find_column(columns, "speed_3d_median") or find_column(columns, "speed_xy_median")
-    if found is None:
-        raise InputError("The table has no median speed column; choose a readout.")
-    return found
+    """Return the default readout: the median speed (3D when defined, else XY).
+
+    Only a column with values counts (3D speed is undefined without full calibration); with
+    neither, the first feature with values, so the choice is always one the design accepts.
+
+    Raises
+    ------
+    InputError
+        When no feature has values.
+    """
+    candidates, _ = feature_columns(features, include_axial=True)
+    for key in ("speed_3d_median", "speed_xy_median"):
+        found = find_column(candidates, key)
+        if found is not None:
+            return found
+    if not candidates:
+        raise InputError("No feature has values in these results; nothing can be compared.")
+    return candidates[0]
 
 
 def feature_columns(features: FeatureSet, include_axial: bool) -> tuple[list[str], list[str]]:
@@ -144,6 +155,14 @@ def coverage_input(features: FeatureSet, design: Design) -> CoverageInput:
         [keys, table[declared].apply(pd.to_numeric, errors="coerce")], axis=1
     ).reset_index(drop=True)
     fovs = keys.reset_index(drop=True)
+    duplicated = fovs.duplicated(list(KEY), keep=False)
+    if duplicated.any():
+        raise InputError(
+            "Several fields of view share condition, biological repeat, technical repeat and "
+            "position_id after the runs were combined: "
+            + ", ".join(sorted(set(fovs.loc[duplicated, "position_id"])))
+            + ". Load the runs without 'shared repeat labels', or give them distinct labels."
+        )
     fovs["repeat_group"] = fovs["biological_repeat"]
     unpaired = unpaired_conditions(fovs, design.control)
     if unpaired:
@@ -166,14 +185,7 @@ def unpaired_conditions(fovs: pd.DataFrame, control: str) -> list[str]:
 
 def morphocoverage_identity() -> dict[str, str | None]:
     """Return the installed MorphoCoverage version and, from a git install, its commit."""
-    from importlib import metadata
-
-    try:
-        dist = metadata.distribution("morphocoverage")
-    except metadata.PackageNotFoundError:
-        return {"version": None, "commit": None}
-    direct = json.loads(dist.read_text("direct_url.json") or "{}")
-    return {"version": dist.version, "commit": direct.get("vcs_info", {}).get("commit_id")}
+    return distribution_identity("morphocoverage")
 
 
 def run_report(
@@ -210,33 +222,35 @@ def run_report(
         raise InputError(f"{out_dir} exists; reports are never overwritten.")
     data = coverage_input(features, design)
     stage = (tracker or Tracker()).stage("MorphoCoverage", 3)
-    scan = scan_design(data.objects, data.fovs)
-    stage.update("design scanned")
-    setup = scan.setup(
-        readout=design.readout,
-        control={"condition": design.control},
-        observation_unit="fov",
-        features=tuple(data.features),
-        random_state=design.random_state,
-    )
-    result = report(scan.objects, scan.fovs, setup)
-    stage.update("statistics done")
-    out_dir.mkdir(parents=True)
-    data.objects.to_csv(out_dir / "morphocoverage_objects.csv", index=False)
-    data.fovs.to_csv(out_dir / "morphocoverage_fovs.csv", index=False)
-    write_json(
-        out_dir / "design.json",
-        {
-            "created": now(),
-            "design": asdict(design),
-            "observation_unit": "fov",
-            "features": data.features,
-            "notes": data.notes,
-            "runs": features.sources,
-            "morphocoverage": morphocoverage_identity(),
-        },
-    )
-    path = html_report(result, scan.objects, scan.fovs, out_dir, title=REPORT_TITLE)
-    stage.update("report written")
-    stage.close()
+    try:
+        scan = scan_design(data.objects, data.fovs)
+        stage.update("design scanned")
+        setup = scan.setup(
+            readout=design.readout,
+            control={"condition": design.control},
+            observation_unit="fov",
+            features=tuple(data.features),
+            random_state=design.random_state,
+        )
+        result = report(scan.objects, scan.fovs, setup)
+        stage.update("statistics done")
+        out_dir.mkdir(parents=True)
+        data.objects.to_csv(out_dir / "morphocoverage_objects.csv", index=False)
+        data.fovs.to_csv(out_dir / "morphocoverage_fovs.csv", index=False)
+        write_json(
+            out_dir / "design.json",
+            {
+                "created": now(),
+                "design": asdict(design),
+                "observation_unit": "fov",
+                "features": data.features,
+                "notes": data.notes,
+                "runs": features.sources,
+                "morphocoverage": morphocoverage_identity(),
+            },
+        )
+        path = html_report(result, scan.objects, scan.fovs, out_dir, title=REPORT_TITLE)
+        stage.update("report written")
+    finally:
+        stage.close()
     return path, result, data

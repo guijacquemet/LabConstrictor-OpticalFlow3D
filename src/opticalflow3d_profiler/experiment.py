@@ -66,6 +66,10 @@ def validate_metadata(table: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise InputError(f"The metadata table lacks the columns: {', '.join(missing)}.")
     table = table.copy()
+    for column in IDENTITY_COLUMNS:  # checked as given: outer spaces are refused, never trimmed
+        for value in table[column]:
+            if isinstance(value, str) and value.strip():
+                check_identity_text(value, column, "metadata table")
     for column in REQUIRED_COLUMNS:
         table[column] = table[column].astype("string").str.strip()
         empty = table[column].isna() | (table[column] == "")

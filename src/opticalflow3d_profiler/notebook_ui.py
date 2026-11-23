@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 from matplotlib.figure import Figure
+from traitlets import TraitError
 
 from . import figures
 from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, ImageSpec
@@ -91,7 +92,7 @@ def guarded(output: widgets.Output, action: Callable[[], None]) -> Callable:
             output.clear_output()
             try:
                 action()
-            except (InputError, ValueError, OSError) as error:
+            except (InputError, ValueError, OSError, TraitError) as error:
                 print(f"⚠️ {error}")
 
     return callback
@@ -147,8 +148,9 @@ class LoadStep:
         load.on_click(guarded(self.output, self.load))
         again.on_click(guarded(self.output, self.pick))
         confirm.on_click(guarded(self.output, self.confirm))
+        preview = guarded(self.preview, self.show_preview)
         for slider in (self.t, self.z):
-            slider.observe(lambda _c: self.show_preview(), names="value")
+            slider.observe(lambda _change: preview(), names="value")
         return widgets.VBox(
             [
                 self.experiment,
@@ -235,7 +237,7 @@ class LoadStep:
             print(f"{issue.severity.upper()}: {issue.message} {issue.action}")
         self.t.max, self.z.max = dims["T"] - 1, dims["Z"] - 1
         self.z.value = dims["Z"] // 2
-        self.show_preview()
+        guarded(self.preview, self.show_preview)()
 
     def show_preview(self) -> None:
         """Show one slice of the example image (read on demand, raw intensities)."""
@@ -243,8 +245,9 @@ class LoadStep:
             return
         with self.preview:
             self.preview.clear_output(wait=True)
-            volume = read_frames(self.session.spec, self.session.header, [self.t.value])[0]
-            title = f"t={self.t.value}, z={self.z.value}"
+        volume = read_frames(self.session.spec, self.session.header, [self.t.value])[0]
+        title = f"t={self.t.value}, z={self.z.value}"
+        with self.preview:
             show(figures.image_preview(volume, self.z.value, title))
 
 

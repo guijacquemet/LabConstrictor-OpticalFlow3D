@@ -218,3 +218,25 @@ def test_intensity_qc_is_opt_in_and_needs_a_foreground():
     assert np.isnan(row.values["qc_foreground_intensity_mean"])
     assert "no foreground" in row.undefined["qc_foreground_intensity_mean"]
     assert features(flow(vx=1.0)).values["qc_region_grid_coverage"] == 1.0
+
+
+@pytest.mark.parametrize("rotation", [0.0, 2.0, 5.0, 37.0, 90.0])
+def test_angular_entropy_is_rotation_invariant_without_a_dominant_direction(rotation):
+    from opticalflow3d_profiler.flow_features import _angular_entropy, _entropy_anchor
+
+    base = np.deg2rad([-179.5, -1.5, 0.5, 178.5])  # antipodally balanced: no mean direction
+    reference = _angular_entropy(base, _entropy_anchor(base, None, 36), 36)
+    theta = np.angle(np.exp(1j * (base + np.deg2rad(rotation))))
+    assert abs(np.mean(np.exp(1j * theta))) < 1e-12
+    assert _angular_entropy(theta, _entropy_anchor(theta, None, 36), 36) == pytest.approx(
+        reference, abs=1e-12
+    )
+
+
+def test_angular_entropy_keeps_its_values_with_a_dominant_direction():
+    from opticalflow3d_profiler.flow_features import _angular_entropy, _entropy_anchor
+
+    theta = np.deg2rad([10.0, 12.0, 30.0, -40.0])
+    dominant = float(np.arctan2(np.mean(np.sin(theta)), np.mean(np.cos(theta))))
+    assert _entropy_anchor(theta, dominant, 36) == dominant
+    assert 0 < _angular_entropy(theta, dominant, 36) < 1

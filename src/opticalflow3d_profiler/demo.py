@@ -354,10 +354,8 @@ def run_demo(
         object_set=OBJECT_SET,
     )
     run = create_run(folder / "results", "run-threshold")
-    progress("Step 2: optical flow...")
-    run_experiment(metadata, settings, run, progress=progress, flow_only=True, tracker=tracker)
-    progress("Step 3: features (intensity-threshold foreground)...")
-    run_experiment(metadata, settings, run, reuse_from=run, progress=progress, tracker=tracker)
+    progress("Optical flow and features (intensity-threshold foreground)...")
+    run_experiment(metadata, settings, run, progress=progress, tracker=tracker)
     progress("Saving QC figures...")
     export_qc_figures(run, settings)
     checks = Checks()

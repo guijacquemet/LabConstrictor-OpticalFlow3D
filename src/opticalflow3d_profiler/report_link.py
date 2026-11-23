@@ -25,7 +25,12 @@ _SERVERS: dict[Path, int] = {}
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
-    """Serve files without logging every request into the notebook."""
+    """Serve the report's files only: no directory listing, no request log in the notebook."""
+
+    def list_directory(self, path: str) -> None:
+        """Refuse directory listings (only named files are served)."""
+        del path
+        self.send_error(404, "No directory listing")
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002 (stdlib name)
         """Do not log."""
