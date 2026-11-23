@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -192,3 +193,35 @@ def test_a_manifest_missing_a_planned_output_is_refused(flow_run):
     assert any("not the planned [3, 4, 5]" in p for p in verify_result(out))
     with pytest.raises(InputError):
         open_result(out)
+
+
+@pytest.mark.parametrize("where", ["tiff", "manifest", "publish"])
+def test_a_failure_up_to_publication_removes_only_the_partial_folder(
+    tmp_path, imagej_file, monkeypatch, where
+):
+    # Re-validation M7: a failure writing the manifest or in os.replace left the partial folder.
+    from opticalflow3d_profiler import flow_backend
+
+    def fail(*_args, **_kwargs):
+        raise OSError(f"{where} failed")
+
+    if where == "tiff":
+        monkeypatch.setattr(flow_backend.tifffile, "imwrite", fail)
+    elif where == "manifest":
+        original = Path.write_text
+        monkeypatch.setattr(
+            Path, "write_text",
+            lambda self, *a, **k: fail() if self.name == "flow_manifest.json"
+            else original(self, *a, **k),
+        )  # fmt: skip
+    else:
+        monkeypatch.setattr(flow_backend.os, "replace", fail)
+    path, _ = imagej_file
+    flow = tmp_path / "flow"
+    (flow / "other").mkdir(parents=True)
+    (flow / "other" / "keep.txt").write_text("unrelated")
+    with pytest.raises(OSError, match=f"{where} failed"):
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"),
+                 flow / "f", "f")  # fmt: skip
+    assert sorted(p.name for p in flow.iterdir()) == ["other"]
+    assert (flow / "other" / "keep.txt").read_text() == "unrelated"
