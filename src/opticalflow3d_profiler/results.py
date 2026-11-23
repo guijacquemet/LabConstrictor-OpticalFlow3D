@@ -38,6 +38,7 @@ DEPENDENCIES = (
     "natsort",
     "tqdm",
     "morphocoverage",
+    "morphobricks-normalization",
     "umap-learn",
     "scikit-learn",
 )

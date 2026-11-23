@@ -20,9 +20,10 @@ Guidance for AI agents and people changing this repository.
   (exact pins). The template merges these pins into `requirements.txt`. The cells only call
   `notebook_analysis_ui.build()`.
 - `tests/profiler/`, `tools/check_profiler.py`, `tools/benchmark_flow.py`, `docs/validation.md`.
-- Condition statistics and the report are MorphoCoverage's (a dependency pinned to a commit in
-  `requirements.yaml`, the Colab install cell and `tools/requirements-checks.txt`); never
-  reimplement them here. The folder layout and the column names follow MorphoBricks
+- Condition statistics and the report are MorphoCoverage's, and the brightness measurement and
+  corrections are morphobricks-normalization's `time_series` (both dependencies pinned to a commit
+  in `requirements.yaml`, the Colab install cell and `tools/requirements-checks.txt`); never
+  reimplement them here (`brightness.py` only applies them to a flow window). The folder layout and the column names follow MorphoBricks
   (`docs/morphobricks.md`). Keep the FOV identity (`condition`, `biological_repeat`,
   `technical_repeat`, `position_id`), the `{object_set}__{feature}` names (single-channel
   videos; `qc_*` columns are metadata) and the field of view as the observation.
