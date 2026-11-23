@@ -352,6 +352,43 @@ def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
     }
 
 
+def test_an_interrupted_or_concurrent_run_is_never_entered_again(experiment, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from opticalflow3d_profiler.results import claim_run
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    interrupted = create_run(tmp_path, "interrupted")
+    claim_run(interrupted)  # a run that stopped before writing its manifest
+    (interrupted / "flow" / one["fov_uid"].iloc[0]).mkdir()  # and had published a flow
+    with pytest.raises(InputError, match="never run twice"):
+        run_experiment(one, settings(), interrupted)
+    assert not (interrupted / "run_manifest.json").exists()
+    race = create_run(tmp_path, "race")
+
+    def attempt(_):
+        try:
+            claim_run(race)
+            return True
+        except InputError:
+            return False
+
+    with ThreadPoolExecutor(8) as pool:
+        assert sum(pool.map(attempt, range(8))) == 1  # exactly one claim wins
+
+
+def test_the_manifest_identifies_the_profiler_source(experiment, tmp_path):
+    from opticalflow3d_profiler.results import implementation_identity
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    manifest = run_experiment(one, settings(), create_run(tmp_path, "ident"), flow_only=True)
+    identity = implementation_identity()
+    assert manifest["profiler"] == identity and len(identity["source_sha256"]) == 64
+    assert identity["modules"] > 20
+
+
 def test_default_readout_is_a_feature_with_values(experiment):
     from dataclasses import replace as replace_set
 
