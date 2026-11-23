@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2026-11-23
+
+### Changed
+- Version updated from 0.1.1 to 0.2.0
+
+**Commit Details:**
+- Hash: [`d53497ad`](https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D/commit/d53497ad3b42c922af07ccf153454cdab8ba4417)
+- Author: guijacquemet
+- Date: 2026-11-23 13:24:45 +0200
+- Message: Merge pull request #11 from guijacquemet/claude/notebook-version-sync
+
+---
 ## [0.1.1] - 2026-11-23
 
 ### Changed
