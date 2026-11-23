@@ -1,5 +1,5 @@
 name: OpticalFlow3D_Profiler
-version: 0.0.1
+version: 0.1.0
 environment_file: environment.yaml
 installer_type: all
 license_file: LICENSE
@@ -14,20 +14,53 @@ keep_pkgs: false
 register_python: false
 initialize_conda: false
 extra_files:
-- app/logo/opticalflow3d_profiler_icon.png: OpticalFlow3D Profiler/opticalflow3d_profiler_icon.png
-- app/logo/opticalflow3d_profiler_icon.ico: OpticalFlow3D Profiler/opticalflow3d_profiler_icon.ico
-- app/logo/opticalflow3d_profiler_icon.icns: OpticalFlow3D Profiler/opticalflow3d_profiler_icon.icns
+- .tools/meta/src_change.yaml: OpticalFlow3D Profiler/src_change.yaml
 - app/bash_bat_scripts/pre_uninstall.sh: pre_uninstall.sh
 - app/bash_bat_scripts/uninstall.sh: uninstall.sh
+- app/logo/opticalflow3d_profiler_icon.icns: OpticalFlow3D Profiler/opticalflow3d_profiler_icon.icns
+- app/logo/opticalflow3d_profiler_icon.ico: OpticalFlow3D Profiler/opticalflow3d_profiler_icon.ico
+- app/logo/opticalflow3d_profiler_icon.png: OpticalFlow3D Profiler/opticalflow3d_profiler_icon.png
 - app/menuinst/Welcome.ipynb: OpticalFlow3D Profiler/notebooks/Welcome.ipynb
 - app/menuinst/notebook_launcher.json: OpticalFlow3D Profiler/notebook_launcher.json
 - app/python_scripts/hide_code_cells.py: OpticalFlow3D Profiler/hide_code_cells.py
 - app/python_scripts/include_path.py: OpticalFlow3D Profiler/include_path.py
 - app/python_scripts/launch_jupyter.py: OpticalFlow3D Profiler/launch_jupyter.py
 - construct.yaml: OpticalFlow3D Profiler/construct.yaml
+- labconstrictor-app.yaml: OpticalFlow3D Profiler/labconstrictor-app.yaml
+- notebooks/OpticalFlow3D_Profiler/OpticalFlow3D_Profiler.ipynb: OpticalFlow3D Profiler/notebooks/OpticalFlow3D_Profiler/OpticalFlow3D_Profiler.ipynb
 - notebooks/notebook_latest_versions.yaml: OpticalFlow3D Profiler/notebook_latest_versions.yaml
+- requirements.lock.txt: OpticalFlow3D Profiler/requirements.lock.txt
 - requirements.txt: OpticalFlow3D Profiler/requirements.txt
+- requirements_gpu.lock.txt: OpticalFlow3D Profiler/requirements_gpu.lock.txt
 - requirements_gpu.txt: OpticalFlow3D Profiler/requirements_gpu.txt
+- setup.py: OpticalFlow3D Profiler/setup.py
+- src/opticalflow3d_profiler/__init__.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/__init__.py
+- src/opticalflow3d_profiler/_upstream/__init__.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/_upstream/__init__.py
+- src/opticalflow3d_profiler/_upstream/_license.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/_upstream/_license.py
+- src/opticalflow3d_profiler/_upstream/calc_flow.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/_upstream/calc_flow.py
+- src/opticalflow3d_profiler/analysis.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/analysis.py
+- src/opticalflow3d_profiler/brightness.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/brightness.py
+- src/opticalflow3d_profiler/comparison.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/comparison.py
+- src/opticalflow3d_profiler/config.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/config.py
+- src/opticalflow3d_profiler/demo.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/demo.py
+- src/opticalflow3d_profiler/experiment.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/experiment.py
+- src/opticalflow3d_profiler/external.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/external.py
+- src/opticalflow3d_profiler/feature_dictionary.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/feature_dictionary.py
+- src/opticalflow3d_profiler/figures.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/figures.py
+- src/opticalflow3d_profiler/flow_backend.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/flow_backend.py
+- src/opticalflow3d_profiler/flow_features.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/flow_features.py
+- src/opticalflow3d_profiler/flow_store.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/flow_store.py
+- src/opticalflow3d_profiler/foreground.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/foreground.py
+- src/opticalflow3d_profiler/image_io.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/image_io.py
+- src/opticalflow3d_profiler/notebook_analysis_ui.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/notebook_analysis_ui.py
+- src/opticalflow3d_profiler/notebook_ui.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/notebook_ui.py
+- src/opticalflow3d_profiler/pipeline.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/pipeline.py
+- src/opticalflow3d_profiler/profile_analysis.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/profile_analysis.py
+- src/opticalflow3d_profiler/qc_export.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/qc_export.py
+- src/opticalflow3d_profiler/results.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/results.py
+- src/opticalflow3d_profiler/synthetic.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/synthetic.py
+- src/opticalflow3d_profiler/temporal_features.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/temporal_features.py
+- src/opticalflow3d_profiler/validation.py: OpticalFlow3D Profiler/src/opticalflow3d_profiler/validation.py
 post_install: app/bash_bat_scripts/post_install.bat # [win]
 post_install: app/bash_bat_scripts/post_install.sh # [unix]
 pre_uninstall: app/bash_bat_scripts/pre_uninstall.bat # [win]
