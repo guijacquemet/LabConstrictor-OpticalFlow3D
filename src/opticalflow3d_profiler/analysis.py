@@ -36,9 +36,9 @@ def comparable_settings(run: Path) -> dict[str, object]:
     """Return the settings of a run that change feature values, for compatibility checks.
 
     Optical-flow parameters, every feature setting (reliability, speed mode, regions,
-    windows, angular thresholds) and the foreground rule. The per-FOV mask files and the
-    calibration values are not included: masks belong to each field of view, and a different
-    pixel size is converted to the same physical unit (units are checked separately).
+    windows, angular thresholds) and the foreground rule. The calibration values are not
+    included: a different pixel size is converted to the same physical unit (units are
+    checked separately).
 
     Raises
     ------
@@ -49,7 +49,7 @@ def comparable_settings(run: Path) -> dict[str, object]:
     if not path.is_file():
         raise InputError(f"{run} has no run_manifest.json; its settings cannot be checked.")
     settings = json.loads(path.read_text(encoding="utf-8")).get("settings", {})
-    foreground = {k: v for k, v in settings.get("foreground", {}).items() if k != "mask_path"}
+    foreground = dict(settings.get("foreground", {}))
     return {
         "flow": settings.get("flow"),
         "features": settings.get("features"),

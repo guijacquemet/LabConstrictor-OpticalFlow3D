@@ -23,11 +23,26 @@ def moving_movie():
 
 @pytest.fixture
 def imagej_file(tmp_path, moving_movie):
-    """An ImageJ hyperstack TZCYX with the nuclei in channel 1 and noise in channel 0."""
+    """A single-channel ImageJ hyperstack TZYX with calibration."""
+    _, stack = moving_movie
+    path = tmp_path / "fov.tif"
+    tifffile.imwrite(
+        path,
+        stack,
+        imagej=True,
+        metadata={"axes": "TZYX", "spacing": 2.0, "unit": "um"},
+        resolution=(1 / 0.65, 1 / 0.65),
+    )
+    return path, stack
+
+
+@pytest.fixture
+def multichannel_file(tmp_path, moving_movie):
+    """A two-channel ImageJ hyperstack TZCYX (refused: single-channel videos only)."""
     _, data = moving_movie
     noise = np.random.default_rng(3).integers(0, 50, data.shape, dtype=np.uint16)
     stack = np.stack([noise, data], axis=2)
-    path = tmp_path / "fov.tif"
+    path = tmp_path / "two_channels.tif"
     tifffile.imwrite(
         path,
         stack,

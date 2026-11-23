@@ -6,11 +6,10 @@ checks the results against the ground truth:
 - condition ``ctrl``: nuclei move at 0.3 px/frame in random XY directions;
 - condition ``drug``: nuclei move at 0.6 px/frame, all within ±15° of +x (collective motion);
 - 3 biological repeats x 2 fields of view per condition, written in the MorphoBricks
-  layout ``experiment/<condition>/<repeat>/<fov>.tif`` (technical repeat ``single``) with
-  ground-truth masks in ``masks/nuclei/...``, plus one unreadable TIFF (its failure must be
-  recorded, not skipped).
+  layout ``experiment/<condition>/<repeat>/<fov>.tif`` (technical repeat ``single``), plus
+  one unreadable TIFF (its failure must be recorded, not skipped).
 
-Every intermediate file is kept: input TIFFs, ground-truth masks, optical-flow TIFFs and
+Every intermediate file is kept: input TIFFs, optical-flow TIFFs and
 manifests, feature tables, QC figures, PCA and comparison exports, and ``demo_report.md``
 with each expectation, its observed value and PASS or FAIL. Expected ranges for speeds
 include the documented gain bias of the 3D algorithm (docs/validation.md).
@@ -23,7 +22,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import tifffile
 
@@ -40,10 +38,9 @@ from .qc_export import export_qc_figures
 from .results import create_run, write_csv, write_text_atomic
 from .synthetic import SyntheticMovie, render
 
-MASK_TYPE = "nuclei"
 BROKEN = "fov9_unreadable"
-CHANNEL, OBJECT_SET = "H2B", "Nuclei"
-NAMES = ColumnNames(CHANNEL, OBJECT_SET)
+OBJECT_SET = "Nuclei"
+NAMES = ColumnNames(OBJECT_SET)
 CONDITIONS = {"ctrl": (0.3, 360.0), "drug": (0.6, 30.0)}
 """Condition -> (XY speed in px/frame, direction spread in degrees)."""
 
@@ -83,7 +80,7 @@ class DemoDesign:
 def _write_fov(
     folder: Path, design: DemoDesign, condition: str, rep: int, fov: int, seed: int
 ) -> dict[str, str]:
-    """Write one synthetic image and its ground-truth mask; return its metadata row."""
+    """Write one synthetic single-channel image; return its labels."""
     speed, spread = CONDITIONS[condition]
     movie = SyntheticMovie(
         design.shape,
@@ -96,18 +93,14 @@ def _write_fov(
         seed=seed,
     )
     relative = Path(condition) / f"rep{rep}" / f"fov{fov}.tif"
-    image, mask = folder / "experiment" / relative, folder / "masks" / MASK_TYPE / relative
-    for path in (image, mask):
-        path.parent.mkdir(parents=True, exist_ok=True)
+    image = folder / "experiment" / relative
+    image.parent.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(image, render(movie), imagej=True, metadata={"axes": "TZYX"})
-    truth = render(replace(movie, noise_sd=0.0), dtype="float64")
-    inside = truth > movie.background + 0.3 * movie.amplitude
-    tifffile.imwrite(mask, inside.astype(np.uint8), imagej=True, metadata={"axes": "TZYX"})
     return {"condition": condition, "biological_repeat": f"rep{rep}", "position_id": f"fov{fov}"}
 
 
 def write_experiment(folder: Path, design: DemoDesign) -> Path:
-    """Write the synthetic experiment folder, ground-truth masks and ground truth.
+    """Write the synthetic experiment folder and its ground truth.
 
     Returns
     -------
@@ -307,29 +300,25 @@ def check_analysis(checks: Checks, run: Path, out: Path, design: DemoDesign) -> 
     )
 
 
-def check_mask_run(
-    checks: Checks, run: Path, mask_run: Path, threshold_table: pd.DataFrame
-) -> None:
-    """Check that the ground-truth-mask run reused the flow and agrees with the threshold run."""
-    manifest = json.loads((mask_run / "run_manifest.json").read_text(encoding="utf-8"))
+def check_reuse_run(checks: Checks, run: Path, whole_run: Path) -> None:
+    """Check that a whole-image re-extraction reused the verified flow and is named ``whole``."""
+    manifest = json.loads((whole_run / "run_manifest.json").read_text(encoding="utf-8"))
     done = [f for f in manifest["fovs"] if f["status"] == "complete"]
     reused = all(str(f["flow_origin"]).startswith("reused") for f in done)
     checks.add(
-        "mask run reuses verified flow",
+        "re-extraction reuses verified flow",
         "no optical flow recomputed",
         f"{len(done)} reused" if reused else "recomputed",
         reused and bool(done),
     )
-    masked = pd.read_csv(mask_run / "features" / "features_per_fov.csv")
-    merged = threshold_table.merge(masked, on="fov_uid", suffixes=("_thr", "_mask"))
-    speed = NAMES.column("speed_xy_median")
-    diff = (merged[f"{speed}_mask"] / merged[f"{speed}_thr"] - 1).abs()
+    columns = pd.read_csv(whole_run / "features" / "features_per_fov.csv", nrows=1).columns
     checks.add(
-        "threshold vs ground-truth mask: median speed",
-        "relative difference < 20%",
-        round(float(diff.max()), 3),
-        bool(diff.max() < 0.2),
+        "whole-image columns (no foreground)",
+        "whole__speed_xy_median",
+        "present" if "whole__speed_xy_median" in columns else "missing",
+        "whole__speed_xy_median" in columns,
     )
+    del run
 
 
 def markdown_table(table: pd.DataFrame) -> str:
@@ -363,8 +352,8 @@ def run_demo(
     folder = Path(folder)
     if folder.exists() and any(folder.iterdir()):
         raise ValueError(f"{folder} is not empty; the demo writes into a new folder.")
-    progress("Writing synthetic images and ground-truth masks...")
-    metadata = read_experiment_folder(write_experiment(folder, design), folder / "masks", MASK_TYPE)
+    progress("Writing the synthetic experiment folder...")
+    metadata = read_experiment_folder(write_experiment(folder, design))
     features = FeatureSettings(
         reliability_value=design.reliability_threshold, region_size_px=64, min_region_voxels=100
     )
@@ -375,7 +364,6 @@ def run_demo(
         FlowParameters(mode="xyz"),  # the demo validates the 3D engine, including Z
         features=features,
         foreground=ForegroundSpec("threshold", design.intensity_threshold),
-        channel_name=CHANNEL,
         object_set=OBJECT_SET,
     )
     run = create_run(folder / "results", "run-threshold")
@@ -386,14 +374,15 @@ def run_demo(
     progress("Saving QC figures...")
     export_qc_figures(run, settings)
     checks = Checks()
-    threshold_table = check_run(checks, run, design)
+    check_run(checks, run, design)
     progress("Step 4-5: PCA, comparison and export...")
     check_analysis(checks, run, run / "analysis" / "demo", design)
-    progress("Re-extraction with ground-truth masks (reusing the flow)...")
-    mask_settings = replace(settings, foreground=ForegroundSpec("mask", mask_axes="TZYX"))
-    mask_run = create_run(folder / "results", "run-truth-masks")
-    run_experiment(metadata, mask_settings, mask_run, reuse_from=run, progress=progress)
-    check_mask_run(checks, run, mask_run, threshold_table)
+    progress("Re-extraction on the whole image (reusing the flow)...")
+    whole_run = create_run(folder / "results", "run-whole-image")
+    run_experiment(
+        metadata, replace(settings, foreground=ForegroundSpec()), whole_run, reuse_from=run
+    )
+    check_reuse_run(checks, run, whole_run)
     report = pd.DataFrame(checks.rows)
     write_csv(folder / "expectations.csv", report)
     verdict = "ALL EXPECTATIONS PASSED" if checks.passed else "SOME EXPECTATIONS FAILED"

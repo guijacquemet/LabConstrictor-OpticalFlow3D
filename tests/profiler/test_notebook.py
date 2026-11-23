@@ -88,7 +88,6 @@ def test_all_steps_drive_end_to_end(tmp_path):
     flow.show()
 
     features = app["features"]
-    features.channel_name.value = "H2B"
     features.fg_mode.value = "threshold"
     features.threshold.value = "300"
     features.rel_value.value = "0.001"

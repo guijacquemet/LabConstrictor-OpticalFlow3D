@@ -22,12 +22,12 @@ def experiment(effect=1.0, repeats=3, fovs=4, seed=0, conditions=("ctrl", "drug"
                 value = 5 + shift + (effect if c != "ctrl" else 0) + rng.normal(0, 0.3)
                 rows.append(
                     {"condition": c, "biological_repeat": f"r{r}", "fov_uid": f"{c}{r}{f}",
-                     "H2B__whole__speed": value, "qc_reliable_fraction": rng.uniform(0.5, 1)}
+                     "whole__speed": value, "qc_reliable_fraction": rng.uniform(0.5, 1)}
                 )  # fmt: skip
     return pd.DataFrame(rows)
 
 
-DEFS = [fdef("H2B__whole__speed"), fdef("qc_reliable_fraction", "qc")]
+DEFS = [fdef("whole__speed"), fdef("qc_reliable_fraction", "qc")]
 FAST = ComparisonSettings("ctrl", permutations=999, balanced_permutations=199)
 
 
@@ -100,7 +100,7 @@ def test_comparison_reads_fovs_and_repeats():
     assert row["paired_scale"] == "log ratio" and row["change"] > 1
     assert row["direction_per_repeat"] == "+++"
     assert row["screen_test"] == "p_fovs_normalised"  # balanced repeats: no balanced test
-    assert len(per_repeat[per_repeat["feature"] == "H2B__whole__speed"]) == 3
+    assert len(per_repeat[per_repeat["feature"] == "whole__speed"]) == 3
     assert set(tests["family"]) == {"features", "qc"}
 
 

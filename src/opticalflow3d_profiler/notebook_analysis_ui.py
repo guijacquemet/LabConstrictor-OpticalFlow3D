@@ -50,17 +50,11 @@ class FeatureStep:
             options=[
                 ("none (exploratory)", "none"),
                 ("intensity threshold", "threshold"),
-                ("mask file", "mask"),
             ],
             description="Foreground",
             style=STYLE,
         )
         self.threshold = text("Raw-intensity threshold")
-        self.mask_path = text("Mask file (or mask_path column)")
-        self.mask_axes = widgets.Dropdown(
-            options=["", "TZYX", "ZYX", "YX"], style=STYLE, description="Mask axes"
-        )
-        self.mask_rule = widgets.Checkbox(description="Use a 2D mask for every Z slice")
         self.rel_mode = widgets.Dropdown(
             options=["absolute", "percentile", "none"],
             description="Reliability filter",
@@ -78,7 +72,6 @@ class FeatureStep:
         self.intensity = widgets.Checkbox(
             description="Also report intensity-based QC (opt-in)", style=STYLE
         )
-        self.channel_name = text("Channel name", placeholder="stain, for example H2B")
         self.object_set = text("Foreground name", "Nuclei")
         self.new_run = text("New run name (re-extraction)", placeholder="optional")
         self.output = widgets.Output()
@@ -93,16 +86,12 @@ class FeatureStep:
             [
                 widgets.HTML(
                     "Feature columns are named as in MorphoBricks: "
-                    "<code>&lt;channel&gt;__&lt;foreground name or whole&gt;__&lt;feature&gt;"
-                    "</code>."
+                    "<code>&lt;foreground name&gt;__&lt;feature&gt;</code>, or "
+                    "<code>whole__&lt;feature&gt;</code> without a foreground."
                 ),
-                self.channel_name,
                 self.fg_mode,
                 self.object_set,
                 self.threshold,
-                self.mask_path,
-                self.mask_axes,
-                self.mask_rule,
                 self.rel_mode,
                 self.rel_value,
                 self.speed,
@@ -135,14 +124,7 @@ class FeatureStep:
             motion_threshold=number(self.motion.value),
             intensity_features=self.intensity.value,
         )
-        mask = self.mask_path.value.strip()
-        foreground = ForegroundSpec(
-            self.fg_mode.value,
-            number(self.threshold.value),
-            Path(mask) if mask else None,
-            self.mask_axes.value,
-            "same_mask_for_every_z" if self.mask_rule.value else "",
-        )
+        foreground = ForegroundSpec(self.fg_mode.value, number(self.threshold.value))
         return features, foreground
 
     def run_settings(self) -> RunSettings:
@@ -152,7 +134,6 @@ class FeatureStep:
             self.session.settings,
             features=features,
             foreground=foreground,
-            channel_name=self.channel_name.value.strip() or None,
             object_set=self.object_set.value.strip(),
         )
 
@@ -411,7 +392,6 @@ class ExternalStep:
             load_step.calibration(),
             features=features,
             foreground=foreground,
-            channel_name=feature_step.channel_name.value.strip() or None,
             object_set=feature_step.object_set.value.strip(),
         )
         row = {f: w.value.strip() for f, w in self.fields.items()} | {

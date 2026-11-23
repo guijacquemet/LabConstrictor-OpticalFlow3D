@@ -4,7 +4,7 @@ Usage::
 
     python tools/demo_synthetic.py OUTPUT_FOLDER [--small]
 
-Writes images, masks, optical flow, feature tables, QC figures, PCA and comparison exports,
+Writes images, optical flow, feature tables, QC figures, PCA and comparison exports,
 and ``demo_report.md`` (each expectation with PASS or FAIL). Exits with 1 if an expectation
 fails. ``--small`` uses 96 x 96 images for a quick check.
 """

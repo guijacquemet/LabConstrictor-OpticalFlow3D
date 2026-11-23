@@ -78,21 +78,6 @@ def test_system_files_are_ignored_and_empty_experiment_refused(tmp_path):
     assert len(discover_experiment(tmp_path)) == 1
 
 
-def test_masks_in_both_morphobricks_layouts(tmp_path):
-    exp, masks = tmp_path / "exp", tmp_path / "masks"
-    touch(exp / "ctrl" / "rep1" / "f1.tif")
-    touch(exp / "ctrl" / "rep1" / "f2.tif")
-    touch(exp / "ctrl" / "rep1" / "f3.tif")
-    touch(masks / "nuclei" / "ctrl" / "rep1" / "f1.tif")
-    touch(masks / "ctrl" / "rep1" / "f2_nuclei.tif")
-    table = discover_experiment(exp, masks, "nuclei")
-    found = dict(zip(table["position_id"], table["mask_path"], strict=True))
-    assert found["f1"].endswith("nuclei/ctrl/rep1/f1.tif")
-    assert found["f2"].endswith("ctrl/rep1/f2_nuclei.tif") and found["f3"] == ""
-    with pytest.raises(InputError, match="outside the experiment"):
-        discover_experiment(exp, exp / "ctrl", "nuclei")
-
-
 def test_position_id_follows_morphobricks():
     assert position_id("img_01.ome.tif") == "img_01"
     assert position_id("A.TIFF") == "A"

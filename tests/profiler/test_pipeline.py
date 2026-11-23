@@ -2,7 +2,6 @@
 
 import json
 
-import numpy as np
 import pandas as pd
 import pytest
 import tifffile
@@ -27,7 +26,7 @@ from opticalflow3d_profiler.synthetic import SyntheticMovie, render
 from opticalflow3d_profiler.validation import InputError
 
 CAL = Calibration(0.65, 0.65, 2.0, 0.5, source="user")
-SPEED = "H2B__Nuclei__speed_xy_median"
+SPEED = "Nuclei__speed_xy_median"
 
 
 def settings(**changes):
@@ -37,7 +36,6 @@ def settings(**changes):
         calibration=CAL,
         features=FeatureSettings(reliability_value=1e-3, region_size_px=24, min_region_voxels=20),
         foreground=ForegroundSpec(mode="threshold", threshold=300.0),
-        channel_name="H2B",
         object_set="Nuclei",
     )
     base.update(changes)
@@ -96,7 +94,7 @@ def test_tables_and_provenance(experiment):
     assert dictionary["units"] == {"lateral": "µm/min", "axial": "µm/min", "time": "min"}
     names = {d["name"] for d in dictionary["fov_features"]}
     assert names <= set(per_fov.columns)
-    assert dictionary["column_naming"]["channel"] == "H2B"
+    assert dictionary["column_naming"]["object_set"] == "Nuclei"
     assert manifest["upstream"]["commit"].startswith("6b88604")
     assert manifest["settings"]["foreground"]["threshold"] == 300.0
     assert manifest["settings"]["calibration"]["pixel_size_z"] == 2.0
@@ -184,18 +182,6 @@ def test_pca_and_comparison_export(experiment):
     assert (out / "figures" / "pca.png").stat().st_size > 1000
 
 
-def test_mask_foreground_must_match_image(experiment, tmp_path):
-    root, metadata, _, _ = experiment
-    mask = tmp_path / "mask.tif"
-    tifffile.imwrite(mask, np.ones((11, 48, 40), np.uint8))
-    run = create_run(tmp_path, "m")
-    fg = ForegroundSpec(mode="mask", mask_path=mask, mask_axes="ZYX")
-    manifest = run_experiment(
-        metadata[metadata["position_id"] != "broken"].iloc[:1], settings(foreground=fg), run
-    )
-    assert "source image coordinates" in manifest["fovs"][0]["message"]
-
-
 def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
     from opticalflow3d_profiler._upstream.calc_flow import process_flow
     from opticalflow3d_profiler.external import external_features
@@ -215,7 +201,7 @@ def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
     manifest = external_features(folder, "exp", row, settings(foreground=ForegroundSpec()), run)
     frames = pd.read_csv(run / "features" / "features_per_frame.csv")
     assert sorted(frames["t"]) == [3, 4]
-    assert "H2B__whole__speed_xy_median" in frames.columns  # no foreground: whole image
+    assert "whole__speed_xy_median" in frames.columns  # no foreground: whole image
     assert manifest["fovs"][0]["flow_origin"].startswith("external, not verified")
     assert "qc_foreground_intensity_mean" not in frames.columns  # intensity QC is opt-in
     with pytest.raises(InputError, match="needs the original image"):
@@ -264,7 +250,7 @@ def test_auto_mode_picks_per_slice_for_anisotropic_stacks(experiment):
     complete = fovs[fovs["status"] == "complete"]
     assert not complete["warnings"].str.contains("spatial derivative kernel").any()
     frames = pd.read_csv(run / "features" / "features_per_frame.csv")
-    assert frames["H2B__Nuclei__vz_mean"].isna().all()
+    assert frames["Nuclei__vz_mean"].isna().all()
     assert frames["undefined_features"].str.contains("no axial component").all()
     flow = next((run / "flow").iterdir())
     assert not list(flow.glob("*_vz_t*.tiff"))

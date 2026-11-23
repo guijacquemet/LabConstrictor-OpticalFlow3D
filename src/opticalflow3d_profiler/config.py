@@ -14,13 +14,12 @@ from typing import Literal
 
 SpeedMode = Literal["xy", "xyz"]
 ReliabilityMode = Literal["absolute", "percentile", "none"]
-ForegroundMode = Literal["mask", "threshold", "none"]
+ForegroundMode = Literal["threshold", "none"]
 OutputDtype = Literal["float64", "float32"]
 BrightnessEqualisation = Literal["none", "global_mean", "histogram_match"]
 FlowMode = Literal["auto", "xyz", "xy_per_slice"]
 AUTO_PER_SLICE_ANISOTROPY = 3.0
 """In ``auto`` mode, Z spacing / XY pixel size above this selects per-slice 2D flow."""
-MaskPlaneRule = Literal["", "same_mask_for_every_z"]
 
 CANONICAL_AXES = "TZYX"
 """Axis order the upstream ``calc_flow3D`` expects (time, z, y, x)."""
@@ -125,7 +124,8 @@ class ImageSpec:
         Confirmed axis letters of the file's first series, in file order, using only
         ``T``, ``Z``, ``C``, ``Y`` and ``X`` (for example ``"TZCYX"``).
     channel
-        Index along ``C`` to analyse; required when the file has a ``C`` axis.
+        Always ``None`` or ``0``: only single-channel videos are analysed (a ``C`` axis of
+        length 1 is accepted).
     calibration
         Physical calibration (may be incomplete).
     """
@@ -143,25 +143,15 @@ class ForegroundSpec:
     Attributes
     ----------
     mode
-        ``"mask"`` (binary mask file), ``"threshold"`` (raw-intensity threshold on the
-        analysed channel at the flow time point) or ``"none"`` (whole image, exploratory).
+        ``"threshold"`` (raw-intensity threshold on the video at the flow time point) or
+        ``"none"`` (whole image, exploratory).
     threshold
         Raw-intensity threshold; voxels with intensity strictly above it are foreground.
         The same value is used for every field of view.
-    mask_path
-        Binary mask TIFF (nonzero = foreground).
-    mask_axes
-        Confirmed axes of the mask file: ``"TZYX"``, ``"ZYX"`` or ``"YX"``.
-    mask_plane_rule
-        Required for a ``"YX"`` mask: ``"same_mask_for_every_z"`` records that the 2D mask
-        is applied to every Z slice. Without it a 2D mask is refused.
     """
 
     mode: ForegroundMode = "none"
     threshold: float | None = None
-    mask_path: Path | None = None
-    mask_axes: str = ""
-    mask_plane_rule: MaskPlaneRule = ""
 
 
 @dataclass(frozen=True)

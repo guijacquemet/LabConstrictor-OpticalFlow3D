@@ -47,12 +47,11 @@ def test_valid_axes_pass():
     assert not codes(check_axes("tzcyx", (15, 11, 2, 8, 8)))
 
 
-def test_channel_must_be_chosen_explicitly():
-    shape = (15, 11, 2, 8, 8)
-    assert codes(check_channel("TZCYX", shape, None)) == {"channel_required"}
-    assert codes(check_channel("TZCYX", shape, 2)) == {"channel_out_of_range"}
-    assert not check_channel("TZCYX", shape, 1)
-    assert codes(check_channel("TZYX", (15, 11, 8, 8), 1)) == {"channel_without_c"}
+def test_only_single_channel_videos_are_accepted():
+    assert codes(check_channel("TZCYX", (15, 11, 2, 8, 8))) == {"multi_channel_not_supported"}
+    assert not check_channel("TZCYX", (15, 11, 1, 8, 8))  # a C axis of length 1 is fine
+    assert not check_channel("TZYX", (15, 11, 8, 8))
+    assert codes(check_channel("TZYX", (15, 11, 8, 8), 1)) == {"channel_out_of_range"}
 
 
 def test_too_few_frames_and_single_z():

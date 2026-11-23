@@ -21,10 +21,6 @@ The MorphoBricks layout (MorphoBricks preprocessing contract §1) is::
   ignored. Links are followed only inside the experiment folder (``link_outside_folder``).
 - OME-Zarr images are not read by this tool and are refused.
 
-Foreground masks live in a masks folder outside the experiment, in the MorphoBricks mask
-layouts (contract §15) for one mask type: ``<masks>/<type>/<same folders>/<position>.tif``
-or ``<masks>/<same folders>/<position>_<type>.tif``.
-
 The rules are reimplemented from MorphoBricks preprocessing (``discovery.py``,
 ``image_names.py``, MIT licence, CellMigrationLab); it is not a dependency. Nothing is read
 from image contents here, and no label is taken from a file name.
@@ -156,7 +152,7 @@ def _leaf_rows(labels: tuple[str, ...], folder: Path, images: list[Path], root: 
             if other != pid_folded and any(pid_folded == other + s for s in MASK_SUFFIXES):
                 raise InputError(
                     f"image_named_as_mask: {where}/{image.name} is named as a mask of "
-                    f"{positions[other].name}; masks belong in a masks folder outside the "
+                    f"{positions[other].name}; masks are not used, remove it from the "
                     "experiment."
                 )
         record = dict(zip(LEVELS, full, strict=True))
@@ -167,58 +163,24 @@ def _leaf_rows(labels: tuple[str, ...], folder: Path, images: list[Path], root: 
     return rows
 
 
-def find_mask(masks: Path, mask_type: str, relative_folder: str, pid: str) -> Path | None:
-    """Return the mask of one position in a MorphoBricks masks folder, or None.
-
-    Raises
-    ------
-    InputError
-        When both layouts, or two files differing in case or extension, match.
-    """
-    candidates = [
-        (masks / mask_type / relative_folder, pid),
-        (masks / relative_folder, f"{pid}_{mask_type}"),
-    ]
-    found = []
-    for folder, stem in candidates:
-        if folder.is_dir():
-            found += [
-                p
-                for p in folder.iterdir()
-                if p.is_file()
-                and _TIFF.match(p.name)
-                and position_id(p.name).casefold() == stem.casefold()
-            ]
-    if len(found) > 1:
-        raise InputError(f"Several masks match {relative_folder}/{pid}: {[p.name for p in found]}.")
-    return found[0] if found else None
-
-
-def discover_experiment(
-    root: Path, masks: Path | None = None, mask_type: str | None = None
-) -> pd.DataFrame:
+def discover_experiment(root: Path) -> pd.DataFrame:
     """Return one row per field of view of a MorphoBricks experiment folder.
 
     Parameters
     ----------
     root
         Experiment folder.
-    masks
-        Optional masks folder (outside the experiment).
-    mask_type
-        The mask type name used in the masks folder (required with ``masks``).
 
     Returns
     -------
     pandas.DataFrame
         ``condition``, ``biological_repeat``, ``technical_repeat``, ``position_id``,
-        ``image_path``, ``source_relative_path`` and, with masks, ``mask_path`` (empty when a
-        position has no mask), sorted by the field-of-view key.
+        ``image_path`` and ``source_relative_path``, sorted by the field-of-view key.
 
     Raises
     ------
     InputError
-        For any layout rule above, an empty experiment or a masks folder inside it.
+        For any layout rule above or an empty experiment.
     """
     root = Path(os.path.realpath(root))
     if not root.is_dir():
@@ -232,14 +194,4 @@ def discover_experiment(
         raise InputError(f"No TIFF image was found in a leaf folder of {root}.")
     table = pd.DataFrame(rows)
     _check_case(table)
-    if masks is not None:
-        masks = Path(os.path.realpath(masks))
-        if masks.is_relative_to(root) or root.is_relative_to(masks):
-            raise InputError("The masks folder must be outside the experiment folder.")
-        if not mask_type:
-            raise InputError("Give the mask type name used in the masks folder.")
-        table["mask_path"] = [
-            (m.as_posix() if (m := find_mask(masks, mask_type, str(Path(r).parent), p)) else "")
-            for r, p in zip(table["source_relative_path"], table["position_id"], strict=True)
-        ]
     return table.sort_values(list(FOV_KEY)).reset_index(drop=True)

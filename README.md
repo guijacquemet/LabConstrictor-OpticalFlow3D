@@ -17,18 +17,20 @@ The installer downloads the Python packages during installation. After that, the
 
 ## What it does
 
-1. **Load images:** TIFF / OME-TIFF, one field of view per file. You confirm the axes, the nuclear
-   channel and the calibration. Nothing is guessed, and missing calibration stays missing.
+1. **Load images:** single-channel TIFF / OME-TIFF videos, one field of view per file, in a
+   MorphoBricks experiment folder. You confirm the axes and the calibration. Nothing is guessed,
+   and missing calibration stays missing.
 2. **Optical flow:** runs upstream `calc_flow3D` one time window at a time and saves `vx`, `vy`, `vz`
    and `rel` in the upstream file layout, with a manifest of SHA-256 hashes. The app estimates memory,
    disk and time before running.
-3. **Motion features:** computed per optical-flow time point inside the foreground (mask or a fixed
-   intensity threshold) and the reliability filter. The families are magnitude, velocity components,
-   collective motion, spatial heterogeneity and QC. The time points are then aggregated per field of
-   view (temporal mean, SD and slope; circular statistics for direction).
-4. **Compare experiments:** PCA of selected feature families (QC never included), and comparison
-   of conditions at the biological-repeat level with effect sizes. Potential confounders are
-   compared alongside the readouts.
+3. **Motion features:** computed per optical-flow time point inside the foreground (a fixed
+   intensity threshold, or the whole image) and the reliability filter. The families are magnitude,
+   velocity components, collective motion, spatial heterogeneity and QC. Every time point is kept in
+   `features_per_frame.csv`, and `features_per_fov.csv` holds the time average per field of view
+   (circular mean for direction).
+4. **Compare experiments:** PCA of selected feature families (QC never included), and the
+   MorphoCoverage comparison of every condition with a control, with the field of view as the
+   observation. Potential confounders are compared as a separate family.
 5. **Export:** feature tables, feature dictionary, PCA, comparison, figures and full provenance.
 
 Previously calculated upstream `process_flow` results can also be analysed. They are marked as
@@ -46,7 +48,7 @@ ratio, coherence, direction, axial drift and noise floor, PCA separation, record
 file, and verified reuse of the optical flow.
 
 It keeps every intermediate file:
-- images and ground-truth masks;
+- the experiment folder of synthetic images;
 - optical-flow TIFFs and their manifests;
 - feature tables;
 - QC figures (`<run>/qc/`);
@@ -90,9 +92,9 @@ processing (measured on a 4-vCPU machine), and 9.4 GB of float64 output per fiel
 
 Input: a MorphoBricks experiment folder, `<root>/<condition>/<biological repeat>/<technical
 repeat>/<image>.tif`. Every level is optional, and a missing level is recorded as `single`.
-Masks go in a separate masks folder. A metadata CSV with `condition, biological_repeat,
-technical_repeat, position_id, image_path` (optional `mask_path`) also works. Feature columns
-are named `<channel>__<foreground or whole>__<feature>`. The comparison follows the MorphoCoverage
+Videos have a single channel. A metadata CSV with `condition, biological_repeat,
+technical_repeat, position_id, image_path` also works. Feature columns are named
+`<foreground name or whole>__<feature>`. The comparison follows the MorphoCoverage
 rules, with the field of view as the observation. See [docs/morphobricks.md](docs/morphobricks.md).
 
 ## Development

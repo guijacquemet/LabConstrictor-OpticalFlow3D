@@ -94,15 +94,12 @@ def button(description: str, style: str = "primary") -> widgets.Button:
 
 
 class LoadStep:
-    """Step 1: inspect a TIFF, confirm axes, channel and calibration, preview it."""
+    """Step 1: inspect a single-channel TIFF, confirm axes and calibration, preview it."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.path = text("Image file", placeholder="/path/to/fov.ome.tif")
         self.axes = text("Confirmed axes (file order)", placeholder="for example TZYX")
-        self.channel = widgets.Dropdown(
-            options=[("no C axis", None)], description="Channel", style=STYLE
-        )
         self.cal = {
             k: text(label)
             for k, label in (
@@ -135,7 +132,7 @@ class LoadStep:
                 self.path,
                 inspect,
                 self.axes,
-                self.channel,
+                widgets.HTML("Single-channel videos only (a C axis of length 1 is accepted)."),
                 *self.cal.values(),
                 widgets.HBox([self.length_unit, self.time_unit]),
                 widgets.HTML(
@@ -171,17 +168,6 @@ class LoadStep:
             widget.value = "" if value is None else f"{value:g}"
         self.length_unit.value, self.time_unit.value = "µm", "min"
         print(f"Calibration pre-filled from {suggestion.source}; check every value.")
-        self.update_channels()
-
-    def update_channels(self) -> None:
-        """Offer a channel choice when the header has a C axis (no default)."""
-        header = self.session.header
-        axes = self.axes.value.upper() or header.header_axes
-        if "C" in axes and len(axes) == len(header.shape):
-            n = header.shape[axes.index("C")]
-            self.channel.options = [("choose…", None)] + [(str(i), i) for i in range(n)]
-        else:
-            self.channel.options = [("no C axis", None)]
 
     def calibration(self) -> Calibration:
         """Return the confirmed calibration in µm and minutes."""
@@ -198,17 +184,13 @@ class LoadStep:
         """Validate the confirmed interpretation and show the preview."""
         if self.session.header is None:
             raise InputError("Inspect the header first.")
-        self.update_channels()
         spec = ImageSpec(
-            self.session.header.path,
-            self.axes.value.strip().upper(),
-            self.channel.value,
-            self.calibration(),
+            self.session.header.path, self.axes.value.strip().upper(), None, self.calibration()
         )
         validate_image(spec, self.session.header)
         dims = dimensions(spec, self.session.header)
         self.session.spec = spec
-        print(f"Confirmed: {dims}, channel {spec.channel}.")
+        print(f"Confirmed: {dims} (single channel).")
         for issue in check_calibration(spec.calibration) + check_time_and_depth(
             dims["T"], dims["Z"], self.session.flow
         ):
@@ -265,8 +247,6 @@ class FlowStep:
         self.experiment = text(
             "Experiment folder", placeholder="MorphoBricks layout: condition/repeat/technical/"
         )
-        self.masks = text("Masks folder (optional)", placeholder="outside the experiment")
-        self.mask_type = text("Mask type", placeholder="for example nuclei")
         self.metadata_csv = text("or metadata CSV", placeholder="optional")
         self.fields = {f: text(f, "single") for f in METADATA_FIELDS}
         self.output = widgets.Output()
@@ -314,7 +294,6 @@ class FlowStep:
                     "missing level is recorded as <i>single</i>."
                 ),
                 self.experiment,
-                widgets.HBox([self.masks, self.mask_type]),
                 self.metadata_csv,
                 single,
                 widgets.HBox([estimate, run]),
@@ -341,12 +320,7 @@ class FlowStep:
     def metadata(self) -> pd.DataFrame:
         """Return the metadata: from the experiment folder, the CSV, or the confirmed image."""
         if self.experiment.value.strip():
-            masks = self.masks.value.strip()
-            return read_experiment_folder(
-                Path(self.experiment.value.strip()),
-                Path(masks) if masks else None,
-                self.mask_type.value.strip() or None,
-            )
+            return read_experiment_folder(Path(self.experiment.value.strip()))
         if self.metadata_csv.value.strip():
             return read_metadata(Path(self.metadata_csv.value.strip()))
         if self.session.spec is None:
@@ -380,7 +354,7 @@ class FlowStep:
         """Create the run folder and calculate the optical flow of every field of view."""
         spec = self.session.spec
         if spec is None:
-            raise InputError("Confirm the axes, channel and calibration in step 1 first.")
+            raise InputError("Confirm the axes and calibration in step 1 first.")
         if not self.parent.value.strip():
             raise InputError("Choose a results folder.")
         metadata = self.metadata()

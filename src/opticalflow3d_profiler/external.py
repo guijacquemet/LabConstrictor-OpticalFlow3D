@@ -1,9 +1,8 @@
 """Features from optical flow calculated earlier by upstream ``process_flow`` (orchestration).
 
 The source image of such a result cannot be verified, so the run manifest marks it
-``external, not verified`` and the intensity QC columns stay undefined. The foreground can
-be ``none`` or a static mask (``ZYX``, or ``YX`` with the explicit plane rule) in the
-coordinates of the saved velocity volumes.
+``external, not verified`` and the intensity QC columns stay undefined. Without the original
+image there is no intensity threshold, so the foreground is ``none`` (whole volume).
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ import pandas as pd
 from .config import to_record
 from .experiment import validate_metadata
 from .flow_store import open_upstream_result
-from .foreground import check_mask, describe, mask_frame
+from .foreground import describe
 from .pipeline import RunSettings, frame_rows, write_feature_tables
 from .results import environment, now, write_csv, write_json
 from .validation import InputError
@@ -46,30 +45,19 @@ def external_features(
     Raises
     ------
     InputError
-        For an incomplete result, a threshold foreground (needs the image) or a
-        time-dependent mask.
+        For an incomplete result or a threshold foreground (needs the image).
     """
     result = open_upstream_result(Path(folder), name)
     metadata = validate_metadata(pd.DataFrame([metadata_row]))
     uid = metadata.loc[0, "fov_uid"]
     result = type(result)(result.folder, uid, result.frames, result.manifest, result.verified)
-    shape = result.frames[0].load()["vx"].shape
-    dims = {"T": 0, "Z": shape[0], "Y": shape[1], "X": shape[2]}
     fg = settings.foreground
     if fg.mode == "threshold":
         raise InputError(
-            "A threshold foreground needs the original image; use a mask or no "
-            "foreground for an external result."
+            "A threshold foreground needs the original image; use no foreground for an "
+            "external result."
         )
-    if fg.mode == "mask" and fg.mask_axes.upper() == "TZYX":
-        raise InputError("Use a static (ZYX or YX) mask for an external result.")
-    info = check_mask(fg, dims) if fg.mode == "mask" else None
-    rows = frame_rows(
-        result,
-        settings,
-        (lambda t, _i: mask_frame(info, t, dims)) if info else (lambda _t, _i: None),
-        None,
-    )
+    rows = frame_rows(result, settings, lambda _t, _i: None, None)
     write_feature_tables(run_dir, metadata, pd.DataFrame(rows), settings)
     status = {
         "fov_uid": uid,
@@ -89,7 +77,7 @@ def external_features(
         "environment": environment(),
         "settings": to_record(settings),
         "external_result": result.manifest,
-        "foreground": describe(fg, info),
+        "foreground": describe(fg),
         "fovs": [status],
     }
     write_json(run_dir / "run_manifest.json", manifest)

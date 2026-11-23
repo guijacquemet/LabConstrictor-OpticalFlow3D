@@ -15,7 +15,6 @@ figures only display saved results; they compute no new numbers.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -86,10 +85,7 @@ def export_fov(
         written[-1],
         dpi=QC_DPI,
     )
-    fg_spec = settings.foreground
-    if str(status.get("mask_path", "") or "") not in ("", "nan"):
-        fg_spec = replace(fg_spec, mask_path=Path(str(status["mask_path"])))
-    foreground_of, _ = foreground_reader(fg_spec, dims)
+    foreground_of, _ = foreground_reader(settings.foreground, dims)
     for frame in open_result(flow_folder(run_dir, status)).frames:
         t = frame.source_frame
         intensity = read_frames(spec, header, [t])[0]

@@ -24,7 +24,7 @@ from .feature_dictionary import dictionary_records, frame_dictionary
 from .flow_backend import flow_identity, run_flow, upstream_identity
 from .flow_features import frame_features, velocity_scale
 from .flow_store import FlowResult, open_result, verify_result
-from .foreground import MaskInfo, check_mask, describe, mask_frame, threshold_frame
+from .foreground import describe, threshold_frame
 from .image_io import ImageHeader, dimensions, file_identity, inspect_tiff, read_frames
 from .naming import ColumnNames
 from .results import environment, now, relative, write_csv, write_json
@@ -53,14 +53,11 @@ class RunSettings:
     calibration
         Calibration of every input (one acquisition setting per run).
     flow, features, foreground
-        Upstream parameters, feature settings and foreground definition. With a
-        ``mask_path`` column in the metadata, each field of view uses its own mask.
-    channel_name
-        The analysed channel's name, the first token of every feature column (MorphoBricks
-        naming, :mod:`~opticalflow3d_profiler.naming`); required to extract features.
+        Upstream parameters, feature settings and foreground definition.
     object_set
-        The foreground's object-set token (with a threshold or masks); without foreground
-        the token is ``whole``.
+        The foreground's object-set token, the first token of every feature column
+        (MorphoBricks naming, :mod:`~opticalflow3d_profiler.naming`); without foreground the
+        token is ``whole``.
     """
 
     axes: str
@@ -69,12 +66,11 @@ class RunSettings:
     flow: FlowParameters = field(default_factory=FlowParameters)
     features: FeatureSettings = field(default_factory=FeatureSettings)
     foreground: ForegroundSpec = field(default_factory=ForegroundSpec)
-    channel_name: str | None = None
-    object_set: str = "Foreground"
+    object_set: str = "Nuclei"
 
     def column_names(self) -> ColumnNames:
         """Return the checked tokens of this run's feature columns."""
-        return ColumnNames.of(self.channel_name, self.object_set, self.foreground.mode != "none")
+        return ColumnNames.of(self.object_set, self.foreground.mode != "none")
 
 
 @dataclass
@@ -221,15 +217,12 @@ def brightness_warning(result: FlowResult, equalised: bool) -> str:
 
 def foreground_reader(spec: ForegroundSpec, dims: dict[str, int]) -> tuple[Callable, dict]:
     """Return the per-frame foreground function and its provenance description."""
-    info: MaskInfo | None = None
-    if spec.mode == "mask":
-        info = check_mask(spec, dims)
-        return (lambda t, _i: mask_frame(info, t, dims)), describe(spec, info)
+    del dims  # the threshold works on each frame's intensities
     if spec.mode == "threshold":
         if spec.threshold is None:
             raise InputError("A foreground threshold value is required.")
-        return (lambda _t, i: threshold_frame(i, spec.threshold)), describe(spec, None)
-    return (lambda _t, _i: None), describe(spec, None)
+        return (lambda _t, i: threshold_frame(i, spec.threshold)), describe(spec)
+    return (lambda _t, _i: None), describe(spec)
 
 
 def process_fov(
@@ -295,8 +288,6 @@ def process_fov(
             )
             return FovOutcome(status)
         fg_spec = settings.foreground
-        if row.get("mask_path"):
-            fg_spec = replace(fg_spec, mask_path=Path(row["mask_path"]))
         foreground_of, fg_record = foreground_reader(fg_spec, dims)
         rows = frame_rows(
             result, settings, foreground_of, lambda t: read_frames(spec, header, [t])[0]
@@ -355,8 +346,8 @@ def write_feature_tables(
 ) -> pd.DataFrame:
     """Write the full per-frame table, the per-FOV time averages and the feature dictionary.
 
-    Feature columns are renamed to the MorphoBricks scheme
-    ``{channel}__{object_set}__{feature}``; ``qc_*`` columns keep their names (metadata).
+    Feature columns are renamed to the MorphoBricks scheme ``{object_set}__{feature}``
+    (single-channel videos); ``qc_*`` columns keep their names (metadata).
     Undefined-feature notes name the columns too.
 
     Returns
@@ -381,8 +372,7 @@ def write_feature_tables(
         {
             "units": {"lateral": scale.lateral_unit, "axial": scale.axial_unit, "time": time_unit},
             "column_naming": {
-                "scheme": "MorphoBricks {channel}__{object_set}__{feature}; qc_* unprefixed",
-                "channel": names.channel,
+                "scheme": "MorphoBricks {object_set}__{feature} (single channel); qc_* unprefixed",
                 "object_set": names.object_set,
             },
             "metadata_columns": list(meta.columns),

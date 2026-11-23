@@ -21,7 +21,7 @@ from .validation import InputError
 
 IDENTITY_COLUMNS = FOV_KEY
 REQUIRED_COLUMNS = (*FOV_KEY, "image_path")
-OPTIONAL_COLUMNS = ("mask_path", "source_relative_path")
+OPTIONAL_COLUMNS = ("source_relative_path",)
 METADATA_COLUMNS = ("fov_uid", *REQUIRED_COLUMNS, *OPTIONAL_COLUMNS)
 
 
@@ -98,7 +98,7 @@ def validate_metadata(table: pd.DataFrame) -> pd.DataFrame:
 def read_metadata(path: Path) -> pd.DataFrame:
     """Read and validate a metadata CSV (all values read as text).
 
-    Relative ``image_path`` and ``mask_path`` values are resolved against the CSV's folder.
+    Relative ``image_path`` values are resolved against the CSV's folder.
 
     Parameters
     ----------
@@ -114,7 +114,9 @@ def read_metadata(path: Path) -> pd.DataFrame:
     if "input_path" in table.columns and "image_path" not in table.columns:
         raise InputError("Rename the column 'input_path' to 'image_path' (MorphoBricks name).")
     base = Path(path).resolve().parent
-    for column in ("image_path", "mask_path"):
+    if "mask_path" in table.columns:
+        raise InputError("Masks are not used; remove the 'mask_path' column.")
+    for column in ("image_path",):
         if column in table.columns:
             table[column] = [
                 (base / v).as_posix() if v.strip() and not Path(v).is_absolute() else v
@@ -123,14 +125,12 @@ def read_metadata(path: Path) -> pd.DataFrame:
     return validate_metadata(table)
 
 
-def read_experiment_folder(
-    root: Path, masks: Path | None = None, mask_type: str | None = None
-) -> pd.DataFrame:
+def read_experiment_folder(root: Path) -> pd.DataFrame:
     """Discover a MorphoBricks experiment folder and validate it as a metadata table.
 
     See :func:`~opticalflow3d_profiler.discovery.discover_experiment` for the layout rules.
     """
-    return validate_metadata(discover_experiment(root, masks, mask_type))
+    return validate_metadata(discover_experiment(root))
 
 
 def replicate_counts(table: pd.DataFrame) -> pd.DataFrame:

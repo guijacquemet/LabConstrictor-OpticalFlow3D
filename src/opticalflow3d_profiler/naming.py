@@ -1,11 +1,11 @@
 """MorphoBricks feature column names (pure).
 
 Feature columns follow the MorphoBricks scheme (decision D09, MorphoRelate's naming): tokens
-joined by a double underscore, the channel token first, then the object-set (or
-compartment) token, then the lower-case feature key: ``H2B__Nuclei__speed_xy_median``. The
-optical flow reads one channel, so every flow feature carries that channel's name. Without a
-foreground the region is the whole image, the MorphoBricks compartment ``whole``; with a
-foreground (a threshold or masks) it is the user's object-set name.
+joined by a double underscore. The videos have a single channel, so columns take the
+MorphoBricks form without a channel token: the object-set (or compartment) token, then the
+lower-case feature key, ``Nuclei__speed_xy_median``. Without a foreground the region is the
+whole image, the MorphoBricks compartment ``whole`` (``whole__speed_xy_median``); with an
+intensity-threshold foreground it is the user's object-set name (default ``Nuclei``).
 
 Per-FOV aggregates over time add the statistic to the feature key
 (``speed_xy_median_time_mean``). Quality-control columns (``qc_*``) are observation
@@ -57,26 +57,8 @@ def reserved_name(text: str) -> bool:
     return text.casefold() in RESERVED_NAMES | set(RESERVED_COMPARTMENTS)
 
 
-def check_channel_name(name: object) -> str:
-    """Return a valid channel token, else raise.
-
-    Raises
-    ------
-    InputError
-        When the name is empty, malformed or reserved. Channels are never named by guess.
-    """
-    if not is_name_token(name):
-        raise InputError(
-            f"Channel name {name!r} is not valid: give the stain's name, starting with a "
-            "letter, with letters, digits and single underscores only (for example H2B)."
-        )
-    if reserved_name(str(name)):
-        raise InputError(f"Channel name {name!r} is reserved by MorphoBricks; choose another.")
-    return str(name)
-
-
 def check_object_set(name: object) -> str:
-    """Return a valid object-set token for a foreground, else raise.
+    """Return a valid object-set token for the foreground, else raise.
 
     Raises
     ------
@@ -129,30 +111,26 @@ def find_column(columns: Iterable[str], key: str) -> str | None:
 
 @dataclass(frozen=True)
 class ColumnNames:
-    """The tokens of a run's feature columns.
+    """The object-set token of a run's feature columns.
 
     Attributes
     ----------
-    channel
-        The analysed channel's name (user-given, checked).
     object_set
-        The object-set token: the user's foreground name, or ``whole`` without foreground.
+        The user's foreground name, or ``whole`` without foreground.
     """
 
-    channel: str
     object_set: str
 
     @classmethod
-    def of(cls, channel: str | None, object_set: str | None, has_foreground: bool) -> ColumnNames:
-        """Check and return the tokens of a run (``whole`` when there is no foreground)."""
-        token = check_object_set(object_set) if has_foreground else WHOLE
-        return cls(check_channel_name(channel), token)
+    def of(cls, object_set: str | None, has_foreground: bool) -> ColumnNames:
+        """Check and return the token of a run (``whole`` when there is no foreground)."""
+        return cls(check_object_set(object_set) if has_foreground else WHOLE)
 
     def column(self, key: str) -> str:
         """Return the column of a feature key; QC keys stay unprefixed (metadata)."""
         if key.startswith("qc_"):
             return key
-        return feature_column(key, self.object_set, (self.channel,))
+        return feature_column(key, self.object_set)
 
     def mapping(self, keys: Iterable[str]) -> dict[str, str]:
         """Return ``{key: column}`` for several keys."""

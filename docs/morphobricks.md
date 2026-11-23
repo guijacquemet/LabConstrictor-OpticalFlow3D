@@ -6,7 +6,7 @@ rules were reimplemented from the sources below (all MIT licence, CellMigrationL
 
 | Convention | Source | Commit | Profiler module |
 |---|---|---|---|
-| Folder layout, labels, `position_id` | morphobricks-preprocessing `docs/contract.md` §1 and §15, `discovery.py`, `image_names.py` | `7cfe8e4` (2026-11-22) | `discovery.py` |
+| Folder layout, labels, `position_id` | morphobricks-preprocessing `docs/contract.md` §1, `discovery.py`, `image_names.py` | `7cfe8e4` (2026-11-22) | `discovery.py` |
 | Feature column names | MorphoFeature `src/morphofeature/naming.py` (decision D09) | `7537a06` (2026-11-22) | `naming.py` |
 | Condition statistics | MorphoCoverage `docs/report/conditions.md`, `statistics.cohen_d`, `sampling_unit/contrast_cells.py`, `sampling_unit/_balanced.py`, `sampling_unit/_cell_chance.py` | `209b9be` (2026-11-18) | `statistics.py`, `comparison.py` |
 
@@ -34,12 +34,13 @@ rules were reimplemented from the sources below (all MIT licence, CellMigrationL
   - links that leave the experiment folder;
   - OME-Zarr images.
 - These are ignored: dot-files, `Thumbs.db`, `desktop.ini` and `__MACOSX`.
-- Masks go in a masks folder outside the experiment, for one named mask type. Two layouts are
-  accepted: `<masks>/<type>/<same folders>/<image>.tif` or `<masks>/<same folders>/<image>_<type>.tif`.
+- Videos have a single channel (a C axis of length 1 is accepted; more channels are refused).
+- Masks are not used: there is no masks folder and no `mask_path`. The foreground is an
+  intensity threshold, or none (whole image).
 - The MorphoBricks description files (`morphobricks.toml`, `experiment_design.csv`) are not
   read.
 
-A metadata CSV with the same columns plus `image_path` (optional `mask_path`) is still accepted.
+A metadata CSV with the same columns plus `image_path` is still accepted.
 
 ## Feature tables and column names
 
@@ -47,11 +48,11 @@ A metadata CSV with the same columns plus `image_path` (optional `mask_path`) is
   point. It has the four identity columns, `t` (the source time point, 0-based) and `time_min`.
 - `features_per_fov.csv`: each feature **averaged over time** per field of view, under the same
   column names (the circular mean for directions; undefined frames are left out, never set to 0).
-- Feature columns follow the MorphoBricks scheme `{channel}__{object_set}__{feature}`, for example
-  `H2B__Nuclei__speed_xy_median`:
-  - the channel token is the name the user gives the analysed channel;
-  - the object-set token is the foreground name, or the compartment `whole` when there is no
-    foreground.
+- Feature columns follow the MorphoBricks scheme for single-channel data,
+  `{object_set}__{feature}`, for example `Nuclei__speed_xy_median`:
+  - with an intensity-threshold foreground, the object-set token is the foreground name
+    (default `Nuclei`);
+  - without a foreground it is the MorphoBricks compartment `whole` (`whole__speed_xy_median`).
 - `qc_*` columns are observation metadata and keep their plain names.
 - Nothing is averaged per biological repeat in a saved table.
 

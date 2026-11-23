@@ -13,7 +13,8 @@ STRUCTURAL = {
     "optical-flow outputs per FOV (verified hashes)",
     "dominant direction drug",
     "comparison: FOVs and paired repeats",
-    "mask run reuses verified flow",
+    "re-extraction reuses verified flow",
+    "whole-image columns (no foreground)",
 }
 
 
@@ -38,5 +39,4 @@ def test_demo_runs_and_keeps_intermediate_files(tmp_path):
     ):
         assert (run / name).exists(), name
     assert (tmp_path / "demo" / "demo_report.md").read_text().startswith("# Synthetic demo")
-    assert (tmp_path / "demo" / "masks" / "nuclei" / "drug" / "rep1" / "fov1.tif").is_file()
     assert (run / "analysis" / "demo" / "condition_tests.csv").exists()
