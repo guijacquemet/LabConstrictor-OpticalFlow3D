@@ -192,9 +192,7 @@ def frame_rows(
             features.put(
                 "qc_brightness_change_per_frame",
                 recorded.get("brightness_change_per_frame"),
-                "not recorded (optical flow from an older result)"
-                if "brightness_change_per_frame" not in recorded
-                else "undefined: the central frame's mean intensity is not above 0",
+                brightness_reason(recorded),
             )
             row: dict[str, object] = {
                 "fov_uid": result.name,
@@ -211,6 +209,15 @@ def frame_rows(
     finally:
         stage.close()
     return rows
+
+
+def brightness_reason(recorded: dict[str, object]) -> str:
+    """Return why an output's recorded brightness change has no value (m6)."""
+    if "brightness_change_per_frame" not in recorded:
+        return "not recorded (optical flow from an older result)"
+    if recorded["brightness_change_per_frame"] is None:
+        return "recorded without a value (null) in the flow manifest; the cause is not recorded"
+    return "undefined: the central frame's mean intensity is not above 0"
 
 
 def brightness_warning(result: FlowResult, equalised: bool) -> str:

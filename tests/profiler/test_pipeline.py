@@ -131,7 +131,7 @@ def test_flow_with_other_parameters_is_recomputed_not_reused(experiment):
     status = manifest["fovs"][0]
     assert status["status"] == "complete"
     assert status["flow_origin"].startswith("computed (earlier flow in")
-    assert "parameters" in status["flow_origin"]
+    assert "parameters.w_sig: 4" in status["flow_origin"] and "→ 2" in status["flow_origin"]
     assert (new / "flow" / one["fov_uid"].iloc[0] / "flow_manifest.json").is_file()
     after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in old.iterdir()}
     assert before == after  # the earlier result is untouched
@@ -430,3 +430,12 @@ def test_the_report_server_serves_only_files_inside_its_folder(tmp_path):
 
     assert status("/report.html") == 200
     assert {status(p) for p in ("/", "/link.txt", "/../secret.txt", "/%2e%2e/secret.txt")} == {404}
+
+
+def test_an_undefined_brightness_change_gets_the_reason_its_record_supports():
+    from opticalflow3d_profiler.pipeline import brightness_reason
+
+    assert "older result" in brightness_reason({})
+    assert "cause is not recorded" in brightness_reason({"brightness_change_per_frame": None})
+    nan = brightness_reason({"brightness_change_per_frame": float("nan")})
+    assert "central frame" in nan
