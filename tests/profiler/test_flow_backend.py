@@ -26,7 +26,7 @@ def flow_run(tmp_path, imagej_file):
     spec = ImageSpec(path, "TZCYX", channel=1)
     header = inspect_tiff(path)
     out = tmp_path / "flow" / "fov1"
-    manifest = run_flow(spec, header, FlowParameters(), out, "fov1")
+    manifest = run_flow(spec, header, FlowParameters(mode="xyz"), out, "fov1")
     return spec, header, stack, out, manifest
 
 
@@ -57,17 +57,17 @@ def test_manifest_records_provenance(flow_run):
 def test_results_are_never_overwritten(flow_run):
     spec, header, _, out, _ = flow_run
     with pytest.raises(InputError, match="never overwritten"):
-        run_flow(spec, header, FlowParameters(), out, "fov1")
+        run_flow(spec, header, FlowParameters(mode="xyz"), out, "fov1")
 
 
 def test_reuse_requires_identical_identity_and_files(flow_run):
     spec, header, _, out, manifest = flow_run
     source = file_identity(spec.path)
-    assert verify_result(out, flow_identity(spec, header, FlowParameters(), source)) == []
-    other = flow_identity(spec, header, FlowParameters(w_sig=2), source)
+    assert verify_result(out, flow_identity(spec, header, FlowParameters(mode="xyz"), source)) == []
+    other = flow_identity(spec, header, FlowParameters(mode="xyz", w_sig=2), source)
     assert any("parameters" in p for p in verify_result(out, other))
     other_channel = flow_identity(
-        ImageSpec(spec.path, "TZCYX", channel=0), header, FlowParameters(), source
+        ImageSpec(spec.path, "TZCYX", channel=0), header, FlowParameters(mode="xyz"), source
     )
     assert any("channel" in p for p in verify_result(out, other_channel))
     target = out / manifest["outputs"][0]["files"]["vx"]["name"]
@@ -86,7 +86,7 @@ def test_open_result_lists_frames(flow_run):
 
 def test_float32_output_is_explicit(tmp_path, imagej_file):
     path, stack = imagej_file
-    params = FlowParameters(output_dtype="float32")
+    params = FlowParameters(mode="xyz", output_dtype="float32")
     manifest = run_flow(
         ImageSpec(path, "TZCYX", channel=1), inspect_tiff(path), params, tmp_path / "f32", "f"
     )
@@ -100,7 +100,13 @@ def test_too_short_movie_is_refused_before_computing(tmp_path):
         path, np.zeros((5, 3, 16, 16), np.uint16), imagej=True, metadata={"axes": "TZYX"}
     )
     with pytest.raises(InputError, match="at least 7"):
-        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(), tmp_path / "o", "x")
+        run_flow(
+            ImageSpec(path, "TZYX"),
+            inspect_tiff(path),
+            FlowParameters(mode="xyz"),
+            tmp_path / "o",
+            "x",
+        )
     assert not (tmp_path / "o").exists()
 
 
@@ -110,7 +116,7 @@ def test_upstream_hash_is_checked():
 
 def test_resource_estimate_full_size_dataset(tmp_path):
     dims = {"T": 15, "Z": 11, "Y": 1840, "X": 1840}
-    estimate = estimate_resources(dims, 2, FlowParameters(), tmp_path)
+    estimate = estimate_resources(dims, 2, FlowParameters(mode="xyz"), tmp_path)
     assert estimate.n_outputs == 9
     assert 10e9 < estimate.peak_ram_bytes < 12e9
     assert estimate.output_bytes == 9 * 11 * 1840 * 1840 * 28

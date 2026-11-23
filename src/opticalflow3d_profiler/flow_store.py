@@ -141,7 +141,7 @@ def open_result(folder: Path) -> FlowResult:
         raise InputError(f"{folder} cannot be used: " + " ".join(problems))
     manifest = read_manifest(folder)
     frames = tuple(
-        FlowFrame(o["source_frame"], {c: folder / o["files"][c]["name"] for c in COMPONENTS})
+        FlowFrame(o["source_frame"], {c: folder / f["name"] for c, f in o["files"].items()})
         for o in manifest["outputs"]
     )
     return FlowResult(folder, manifest["name"], frames, manifest, verified=True)

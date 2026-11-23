@@ -373,6 +373,7 @@ def run_demo(
         "TZYX",
         None,
         design.calibration,
+        FlowParameters(mode="xyz"),  # the demo validates the 3D engine, including Z
         features=features,
         foreground=ForegroundSpec("threshold", design.intensity_threshold),
     )

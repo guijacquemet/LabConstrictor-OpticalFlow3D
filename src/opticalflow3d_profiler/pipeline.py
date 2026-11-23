@@ -34,6 +34,7 @@ from .validation import (
     check_feature_settings,
     check_time_and_depth,
     raise_for_errors,
+    resolve_flow_mode,
 )
 
 LOG = logging.getLogger("opticalflow3d_profiler")
@@ -401,8 +402,13 @@ def run_experiment(
             f"{run_dir} already holds features; create a new run that reuses "
             "its optical flow to extract features with other settings."
         )
+    settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
         raise_for_errors(check_feature_settings(settings.features, settings.foreground))
+        if settings.flow.mode == "xy_per_slice" and settings.features.speed_mode == "xyz":
+            raise InputError(
+                "3D speed needs 3D optical flow; with per-slice 2D flow choose XY speed."
+            )
     handler = logging.FileHandler(run_dir / "logs" / "run.log", encoding="utf-8")
     LOG.addHandler(handler)
     LOG.setLevel(logging.INFO)

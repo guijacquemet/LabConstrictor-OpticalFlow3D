@@ -42,8 +42,10 @@ def test_brightness_ramp_is_read_as_motion_unless_equalised():
     movie = SyntheticMovie(shape=(7, 11, 80, 80), n_nuclei=12, brightness_ramp=0.08)
     data = render(movie, dtype="float64")
     interior = nuclear_interior(movie, data[3])
-    raw, record = flow_window(data, FlowParameters())
-    fixed, fixed_record = flow_window(data, FlowParameters(brightness_equalisation="global_mean"))
+    raw, record = flow_window(data, FlowParameters(mode="xyz"))
+    fixed, fixed_record = flow_window(
+        data, FlowParameters(mode="xyz", brightness_equalisation="global_mean")
+    )
     assert record["brightness_change_per_frame"] == pytest.approx(0.08, rel=0.1)
     assert record["equalisation_factors"] is None
     raw_speed = np.median(np.sqrt(raw["vx"] ** 2 + raw["vy"] ** 2 + raw["vz"] ** 2)[interior])
@@ -61,7 +63,7 @@ def test_equalised_run_is_upstream_on_the_scaled_window_and_changes_identity(tmp
     path = tmp_path / "ramp.tif"
     tifffile.imwrite(path, data, imagej=True, metadata={"axes": "TZYX"})
     spec, header = ImageSpec(path, "TZYX"), inspect_tiff(path)
-    params = FlowParameters(brightness_equalisation="global_mean")
+    params = FlowParameters(mode="xyz", brightness_equalisation="global_mean")
     manifest = run_flow(spec, header, params, tmp_path / "flow", "f")
     output = manifest["outputs"][0]
     scaled, _ = equalise_window(data, window_means(data))
@@ -70,7 +72,7 @@ def test_equalised_run_is_upstream_on_the_scaled_window_and_changes_identity(tmp
     np.testing.assert_array_equal(saved, expected)
     assert manifest["identity"]["parameters"]["brightness_equalisation"] == "global_mean"
     source = file_identity(path)
-    assert flow_identity(spec, header, FlowParameters(), source) != manifest["identity"]
+    assert flow_identity(spec, header, FlowParameters(mode="xyz"), source) != manifest["identity"]
 
 
 def test_brightness_qc_column_and_warning(tmp_path):
@@ -96,6 +98,7 @@ def test_brightness_qc_column_and_warning(tmp_path):
         "TZYX",
         None,
         Calibration(),
+        FlowParameters(mode="xyz"),
         features=FeatureSettings(reliability_value=1e-3, region_size_px=16, min_region_voxels=10),
         foreground=ForegroundSpec("threshold", 300.0),
     )
@@ -132,8 +135,10 @@ def test_histogram_matching_also_removes_a_brightness_ramp():
     movie = SyntheticMovie(shape=(7, 11, 80, 80), n_nuclei=12, brightness_ramp=0.08)
     data = render(movie)
     interior = nuclear_interior(movie, data[3])
-    raw, _ = flow_window(data, FlowParameters())
-    matched, record = flow_window(data, FlowParameters(brightness_equalisation="histogram_match"))
+    raw, _ = flow_window(data, FlowParameters(mode="xyz"))
+    matched, record = flow_window(
+        data, FlowParameters(mode="xyz", brightness_equalisation="histogram_match")
+    )
     assert record["histogram_matched_to_frame"] == 3
 
     def speed(f):
