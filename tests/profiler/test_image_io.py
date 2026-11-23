@@ -147,3 +147,27 @@ def test_ome_values_without_units_are_flagged(tmp_path):
     header = inspect_tiff(path)
     assert header.calibration_suggestion.frame_interval == pytest.approx(0.5)  # 30 s, OME default
     assert any("TimeIncrement (unit not stated: OME default s)" in n for n in header.notes)
+
+
+@pytest.mark.parametrize(
+    ("header_axes", "shape", "confirmed"),
+    [("ZCYX", (7, 3, 8, 8), "TZYX"), ("ZCYX", (7, 1, 8, 8), "TZYX")],
+)
+def test_axes_named_without_t_cannot_be_read_as_time(tmp_path, header_axes, shape, confirmed):
+    # Re-validation R3: a Z-stack with channels and no T was accepted as TZYX.
+    path = tmp_path / "zstack.tif"
+    tifffile.imwrite(path, np.zeros(shape, np.uint16), metadata={"axes": header_axes},
+                     photometric="minisblack")  # fmt: skip
+    header = inspect_tiff(path)
+    assert header.header_axes == header_axes and header.axes_ambiguous
+    with pytest.raises(InputError, match="axes_contradict_header"):
+        validate_image(ImageSpec(path, confirmed), header)
+
+
+def test_known_axes_keep_their_role_when_others_are_unknown():
+    from opticalflow3d_profiler.image_io import named_axis_conflicts
+
+    assert named_axis_conflicts("TZYX", "QZYX") == ""  # the unknown axis may be T
+    assert "axis 2 is Z" in named_axis_conflicts("ZTYX", "QZYX")
+    assert "axis 1 is Z" in named_axis_conflicts("TZYX", "ZCYX")
+    assert named_axis_conflicts("TZYX", "IQYX") == ""

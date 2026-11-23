@@ -242,12 +242,19 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
     """
     issues = check_axes(spec.axes, header.shape) + check_channel(spec.axes, header.shape)
     raise_for_errors(issues)
-    if not header.axes_ambiguous and spec.axes.strip().upper() != header.header_axes:
+    if spec.axes.upper()[-2:] != "YX":
+        raise InputError(
+            "Y and X must be the last two axes of the file; other layouts are "
+            "not supported in this version."
+        )
+    contradicted = named_axis_conflicts(spec.axes.strip().upper(), header.header_axes)
+    if contradicted:
         raise InputError(
             f"axes_contradict_header: {header.path.name} names its axes {header.header_axes} "
-            f"in its header, but {spec.axes.strip().upper()} was confirmed. Axes the header names "
-            "are never reinterpreted (Z planes read as time points, or channels as Z, would give "
-            "false velocities); confirm the header's axes or fix the file."
+            f"in its header, but {spec.axes.strip().upper()} was confirmed ({contradicted}). "
+            "Every axis the header names keeps its role, even when it names only some axes or "
+            "has no T (Z planes read as time points, or channels as Z, would give false "
+            "velocities); confirm the header's axes or fix the file."
         )
     if header.n_series > 1:
         raise InputError(
@@ -259,11 +266,23 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
             "The file stores samples per pixel (RGB or similar planar samples); "
             "save the nuclear channel as a greyscale TIFF."
         )
-    if spec.axes.upper()[-2:] != "YX":
-        raise InputError(
-            "Y and X must be the last two axes of the file; other layouts are "
-            "not supported in this version."
-        )
+
+
+def named_axis_conflicts(confirmed: str, header_axes: str) -> str:
+    """Return where confirmed axes contradict the axes a header names ('' when none).
+
+    Every position whose header letter is an axis role (``T``, ``Z``, ``C``, ``Y``, ``X``)
+    must be confirmed with that letter; unknown positions (tifffile's ``Q``, ``I``) are the
+    user's to confirm. A header without ``T`` (``ZCYX``) therefore cannot be read as a
+    time-lapse (re-validation R3).
+    """
+    if len(confirmed) != len(header_axes):
+        return f"{len(confirmed)} axes confirmed for {len(header_axes)} in the file"
+    return ", ".join(
+        f"axis {i + 1} is {named} in the header, not {given}"
+        for i, (given, named) in enumerate(zip(confirmed, header_axes, strict=True))
+        if named in "TZCYX" and given != named
+    )
 
 
 def dimensions(spec: ImageSpec, header: ImageHeader) -> dict[str, int]:
