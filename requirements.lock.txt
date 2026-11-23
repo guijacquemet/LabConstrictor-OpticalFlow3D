@@ -1,7 +1,7 @@
 # Lock file of requirements.txt: every package the installer installs with pip, with its exact version.
 # Written by .tools/python/lock_requirements.py (uv 0.13.3, universal resolution for Python 3.11.13); do not edit it by hand.
 # It is written again only when requirements.txt, the Python or JupyterLab version changes (see the fingerprint below).
-# lock-input: sha256:2cb7603878cc8c0258653bceb7e6cece9c025a62289ab7aabff59f413e1865ac
+# lock-input: sha256:995be65aec69e02eedf640c20ec1bc663df9cc93e9e012ce04f806bcf020b432
 
 asttokens==3.0.2
 charset-normalizer==3.5.3
@@ -25,6 +25,7 @@ kiwisolver==1.5.1
 llvmlite==0.50.0
 matplotlib==3.10.3
 matplotlib-inline==0.2.2
+morphobricks-normalization @ git+https://github.com/CellMigrationLab/morphobricks-normalization@b3a81042eb667f85e17a26005ae40c4e0396bbb0
 morphocoverage @ git+https://github.com/CellMigrationLab/MorphoCoverage@209b9be40a14aef5a5e244a8d031a4828f1e96ef
 natsort==8.4.0
 numba==0.68.1
