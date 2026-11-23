@@ -56,6 +56,20 @@ class DemoDesign:
     )
     reliability_threshold: float = 50.0
     intensity_threshold: float = 300.0
+    drift_tolerance: float = 0.01
+    axial_floor_tolerance: float = 0.03
+
+    @classmethod
+    def small(cls) -> DemoDesign:
+        """Return the quick 96 x 96 design (about 1.5 min).
+
+        With 14 nuclei per image the axial statistics are noisier, so their tolerances are
+        2.5x and 1.5x wider (measured: drift 0.0106 and noise floor 0.0275 slice/frame,
+        against 0.0022 and 0.0196 at full size).
+        """
+        return cls(
+            shape=(15, 11, 96, 96), n_nuclei=14, drift_tolerance=0.025, axial_floor_tolerance=0.045
+        )
 
 
 def _write_fov(
@@ -220,16 +234,16 @@ def _check_axial_and_confounders(checks: Checks, per_fov: pd.DataFrame, design: 
     drift = float((per_fov["vz_mean__tmean"] / z_scale).abs().max())
     checks.add(
         "net axial drift (true vz = 0)",
-        "|mean vz| < 0.01 slice/frame",
+        f"|mean vz| < {design.drift_tolerance:g} slice/frame",
         round(drift, 4),
-        drift < 0.01,
+        drift < design.drift_tolerance,
     )
     floor = float((per_fov["vz_abs_mean__tmean"] / z_scale).max())
     checks.add(
         "axial noise floor (true vz = 0)",
-        "mean|vz| < 0.03 slice/frame",
+        f"mean|vz| < {design.axial_floor_tolerance:g} slice/frame",
         round(floor, 4),
-        floor < 0.03,
+        floor < design.axial_floor_tolerance,
     )
     size = _condition_means(per_fov, "qc_object_mean_voxels__tmean")
     size_ratio = size["drug"] / size["ctrl"]

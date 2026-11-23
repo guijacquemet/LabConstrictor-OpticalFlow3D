@@ -396,7 +396,7 @@ class DemoStep:
         """Run the demo and show each expectation with PASS or FAIL."""
         if not self.folder.value.strip():
             raise InputError("Choose a new, empty folder.")
-        design = DemoDesign(shape=(15, 11, 96, 96), n_nuclei=14) if self.small.value else None
+        design = DemoDesign.small() if self.small.value else None
         checks = run_demo(Path(self.folder.value.strip()), design, progress=lambda _l: None)
         display(pd.DataFrame(checks.rows))
         print("All expectations passed." if checks.passed else "Some expectations FAILED.")

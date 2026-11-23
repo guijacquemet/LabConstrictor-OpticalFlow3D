@@ -96,6 +96,8 @@ def main() -> None:
     loopback_up()
     check_offline()
     os.environ["JUPYTER_DATA_DIR"] = tempfile.mkdtemp()  # only the app's own kernel
+    # As launch_jupyter.py does: the app's kernel wins over a user-level "python3" kernelspec.
+    os.environ["JUPYTER_PREFER_ENV_PATH"] = "1"
     root = Path(sys.argv[1])
     check_jupyterlab(root, sys.argv[2:])
     run_notebook(root)

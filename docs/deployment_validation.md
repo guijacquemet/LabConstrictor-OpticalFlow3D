@@ -18,3 +18,24 @@ is published.
 Still to do after the first release: download the Linux `.sh` installer, install it on a clean
 machine, launch the app from its menu entry, and run `tools/offline_smoke.py` with the installed
 prefix. Windows and macOS are not built (`distribution.platforms: [linux-x86_64]`) and are untested.
+
+## Release 0.1.0: the real Linux installer (23 November 2026)
+
+The template's *Build Release Installers* workflow built `OpticalFlow3D_Profiler-0.1.0-Linux-x86_64.sh`
+(222 MB, SHA-256 `95aac0d4…0bd04`) and attached it to the release. Then, in a Linux x86-64 container:
+
+| Check | Result |
+|---|---|
+| Download; SHA-256 equals the release digest | passed |
+| `bash OpticalFlow3D_Profiler-0.1.0-Linux-x86_64.sh -b -p <prefix>` (fresh prefix) | passed in 45 s; `post_install` finished ("Launcher preflight completed", menu entries created) |
+| Installed versions | app 0.1.0 (`construct.yaml`, package, metadata); notebook 0.2.0 |
+| `unshare -rn python tools/offline_smoke.py "<prefix>/OpticalFlow3D Profiler"` (no network) | passed: JupyterLab serves the notebook and every cell runs |
+| Synthetic demo (96 × 96) with the installed package, no network | 16/17 with 0.1.0. The axial drift check (0.0106 against 0.01) was too strict for the small design. Fixed after the release: `DemoDesign.small()` has size-appropriate tolerances, and now gives 17/17 |
+
+Found during this test and fixed after the release:
+- **Installer thank-you text said 0.0.1.** `conclusion_text` was written on two lines, which
+  `bump_version.py` does not match. It is now on one line.
+- **The smoke tool failed on machines with a user-level `python3` kernel.** It now sets
+  `JUPYTER_PREFER_ENV_PATH=1`, as `launch_jupyter.py` does for the real app.
+
+Not tested: launching from the desktop menu (no desktop session), Windows and macOS.

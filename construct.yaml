@@ -8,8 +8,7 @@ welcome_image: app/logo/opticalflow3d_profiler_banner.png
 header_image: app/logo/opticalflow3d_profiler_header.png
 icon_image: app/logo/opticalflow3d_profiler_icon.png
 
-conclusion_text: Thank you! You have successfully installed OpticalFlow3D Profiler
-  0.0.1.
+conclusion_text: 'Thank you! You have successfully installed OpticalFlow3D Profiler 0.1.0.'
 keep_pkgs: false
 register_python: false
 initialize_conda: false
