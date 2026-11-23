@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2026-11-23
+
+### Changed
+- Version updated from 0.2.0 to 0.3.0
+
+**Commit Details:**
+- Hash: [`c4a64c19`](https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D/commit/c4a64c1977e7309a5549889ffcfd51940c2f229e)
+- Author: guijacquemet
+- Date: 2026-11-23 18:46:22 +0200
+- Message: Merge pull request #14 from guijacquemet/claude/morphobricks-layout
+
+---
 ## [0.2.0] - 2026-11-23
 
 ### Changed

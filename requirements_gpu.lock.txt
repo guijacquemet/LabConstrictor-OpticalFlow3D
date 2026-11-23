@@ -1,7 +1,7 @@
 # Lock file of requirements_gpu.txt: every package the installer installs with pip, with its exact version.
 # Written by .tools/python/lock_requirements.py (uv 0.13.3, universal resolution for Python 3.11.13); do not edit it by hand.
 # It is written again only when requirements_gpu.txt, the Python or JupyterLab version changes (see the fingerprint below).
-# lock-input: sha256:0bbb963afb2a45a88e63d994391830c47a4b72ced858ef825b3ac8e4dbad8e6f
+# lock-input: sha256:2cb7603878cc8c0258653bceb7e6cece9c025a62289ab7aabff59f413e1865ac
 
 asttokens==3.0.2
 charset-normalizer==3.5.3
@@ -14,7 +14,7 @@ cycler==0.12.1
 executing==2.3.0
 fonttools==4.68.0
 idna==3.20
-ipython==9.18.1
+ipython==9.19.1
 ipython-pygments-lexers==1.1.1
 ipywidgets==8.1.7
 jedi==0.20.1
@@ -22,9 +22,12 @@ jl-hidecode==0.0.1
 joblib==1.6.0
 jupyterlab-widgets==3.0.17
 kiwisolver==1.5.1
+llvmlite==0.50.0
 matplotlib==3.10.3
 matplotlib-inline==0.2.2
+morphocoverage @ git+https://github.com/CellMigrationLab/MorphoCoverage@209b9be40a14aef5a5e244a8d031a4828f1e96ef
 natsort==8.4.0
+numba==0.68.1
 numpy==2.2.6
 packaging==26.3
 pandas==2.2.3
@@ -36,6 +39,7 @@ psutil==7.2.2 ; sys_platform != 'android' and sys_platform != 'cygwin' and sys_p
 ptyprocess==0.7.0 ; sys_platform != 'emscripten' and sys_platform != 'win32'
 pure-eval==0.2.4
 pygments==2.21.0
+pynndescent==0.7.0
 pyparsing==3.3.3
 python-dateutil==4.0.0
 pytz==2026.6
@@ -46,9 +50,11 @@ scipy==1.15.3
 stack-data==0.6.3
 threadpoolctl==3.8.0
 tifffile==2025.5.10
+tqdm==4.70.1
 traitlets==5.16.1
 typing-extensions==4.16.0 ; python_full_version < '3.12'
 tzdata==2026.6
+umap-learn==0.5.7
 urllib3==2.8.0
 wcwidth==0.9.5
 widgetsnbextension==4.0.16
