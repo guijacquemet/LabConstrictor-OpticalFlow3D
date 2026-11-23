@@ -24,7 +24,7 @@ from opticalflow3d_profiler.demo import DemoDesign, run_demo  # noqa: E402
 
 def main() -> int:
     """Run the demo and return the exit code."""
-    small = DemoDesign(shape=(15, 11, 96, 96), n_nuclei=14)
+    small = DemoDesign.small()
     checks = run_demo(Path(sys.argv[1]), small if "--small" in sys.argv else DemoDesign())
     for row in checks.rows:
         print(f"{row['result']}  {row['check']}: {row['observed']} (expected {row['expected']})")
