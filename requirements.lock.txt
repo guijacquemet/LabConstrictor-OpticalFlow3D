@@ -1,7 +1,7 @@
 # Lock file of requirements.txt: every package the installer installs with pip, with its exact version.
 # Written by .tools/python/lock_requirements.py (uv 0.13.3, universal resolution for Python 3.11.13); do not edit it by hand.
 # It is written again only when requirements.txt, the Python or JupyterLab version changes (see the fingerprint below).
-# lock-input: sha256:5cd9944d3fc4972920c7efd2892d12f7a48e6578ac307e19708b48a9aa6be90b
+# lock-input: sha256:5b87da42906917216c4574e6bb0a4cd17fc5d58272cff399142dd787f6d36b70
 
 asttokens==3.0.2
 charset-normalizer==3.5.3
