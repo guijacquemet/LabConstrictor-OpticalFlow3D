@@ -275,3 +275,39 @@ def test_unpaired_runs_are_refused_for_morphocoverage(experiment, tmp_path):
         coverage_input(scoped, Design("ctrl", SPEED, repeats_paired=True))
     shared = load_runs([ctrl, drug], shared_repeat_labels=True)
     assert len(coverage_input(shared, Design("ctrl", SPEED, repeats_paired=True)).objects) == 6
+
+
+def test_runs_with_the_same_folder_name_are_never_paired(experiment, tmp_path):
+    from opticalflow3d_profiler.coverage import Design, coverage_input
+
+    _, _, run, _ = experiment
+    ctrl = _copy_run(run, tmp_path / "batchA" / "run1", "a-")
+    drug = _copy_run(run, tmp_path / "batchB" / "run1", "b-")
+    for folder, keep in ((ctrl, "ctrl"), (drug, "drug")):
+        table = folder / "features" / "features_per_fov.csv"
+        data = pd.read_csv(table, dtype=str, keep_default_na=False)
+        data[data["condition"] == keep].to_csv(table, index=False)
+    combined = load_runs([ctrl, drug])
+    assert combined.table["run"].nunique() == 2  # same folder name, different labels
+    with pytest.raises(InputError, match="No biological repeat holds both"):
+        coverage_input(combined, Design("ctrl", SPEED, repeats_paired=True))
+
+
+def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
+    import hashlib
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    run = create_run(tmp_path, "flow-only")
+    run_experiment(one, settings(), run, flow_only=True)
+    digests = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in (run / "run_manifest.json", run / "fovs.csv")
+    }
+    for flow_only in (True, False):
+        with pytest.raises(InputError, match="never run twice"):
+            run_experiment(one, settings(), run, flow_only=flow_only, reuse_from=run)
+    assert digests == {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in (run / "run_manifest.json", run / "fovs.csv")
+    }

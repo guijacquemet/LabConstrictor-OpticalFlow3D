@@ -144,6 +144,14 @@ def coverage_input(features: FeatureSet, design: Design) -> CoverageInput:
         [keys, table[declared].apply(pd.to_numeric, errors="coerce")], axis=1
     ).reset_index(drop=True)
     fovs = keys.reset_index(drop=True)
+    duplicated = fovs.duplicated(list(KEY), keep=False)
+    if duplicated.any():
+        raise InputError(
+            "Several fields of view share condition, biological repeat, technical repeat and "
+            "position_id after the runs were combined: "
+            + ", ".join(sorted(set(fovs.loc[duplicated, "position_id"])))
+            + ". Load the runs without 'shared repeat labels', or give them distinct labels."
+        )
     fovs["repeat_group"] = fovs["biological_repeat"]
     unpaired = unpaired_conditions(fovs, design.control)
     if unpaired:

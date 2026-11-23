@@ -216,11 +216,18 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
     Raises
     ------
     InputError
-        When the axes are invalid, the file has several channels or series, or Y and X are
-        not the last two axes (pages must be XY planes).
+        When the axes are invalid or contradict axes the header names, the file has several
+        channels or series, or Y and X are not the last two axes (pages must be XY planes).
     """
     issues = check_axes(spec.axes, header.shape) + check_channel(spec.axes, header.shape)
     raise_for_errors(issues)
+    if not header.axes_ambiguous and spec.axes.strip().upper() != header.header_axes:
+        raise InputError(
+            f"axes_contradict_header: {header.path.name} names its axes {header.header_axes} "
+            f"in its header, but {spec.axes.strip().upper()} was confirmed. Axes the header names "
+            "are never reinterpreted (Z planes read as time points, or channels as Z, would give "
+            "false velocities); confirm the header's axes or fix the file."
+        )
     if header.n_series > 1:
         raise InputError(
             f"multiple_series: {header.path.name} holds {header.n_series} image series "

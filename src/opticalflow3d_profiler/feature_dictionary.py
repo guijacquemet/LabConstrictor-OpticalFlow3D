@@ -161,8 +161,10 @@ COLLECTIVE_ROWS = [
     (
         "xy_angular_entropy",
         "Normalised Shannon entropy of XY directions (1 = uniform, 0 = one direction). One "
-        "bin is centred on the dominant direction, so rotating the image does not change it.",
-        "-Σ p log p / log(angle_bins), angle_bins bins with one centred on θ_dom",
+        "bin is centred on the dominant direction, or without one on the first non-zero "
+        "circular moment whose order divides angle_bins, so rotating the image does not "
+        "change it.",
+        "-Σ p log p / log(angle_bins), one bin centred on θ_dom, else arg(m_k)/k",
         "1",
         "vx, vy",
         BIOLOGICAL,

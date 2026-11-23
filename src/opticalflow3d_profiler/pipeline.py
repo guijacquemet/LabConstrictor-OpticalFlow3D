@@ -405,9 +405,10 @@ def run_experiment(
 ) -> dict[str, object]:
     """Process every field of view of a validated metadata table into a run folder.
 
-    Run it once with ``flow_only=True`` and again with ``reuse_from=run_dir`` to calculate
-    the optical flow and the features in two steps; features are extracted only once per
-    run (use a new run with ``reuse_from`` for other feature settings).
+    A run folder is used once: a second call on a folder that holds a ``run_manifest.json``
+    is refused, a flow-only run included, so no status or provenance file is ever replaced.
+    To extract features from earlier optical flow, or with other settings, create a new run
+    with ``reuse_from``.
 
     Parameters
     ----------
@@ -435,12 +436,12 @@ def run_experiment(
     Raises
     ------
     InputError
-        When the run already holds feature tables.
+        When the run folder already holds a run.
     """
-    if (run_dir / "features" / "features_per_fov.csv").exists():
+    if (run_dir / "run_manifest.json").exists():
         raise InputError(
-            f"{run_dir} already holds features; create a new run that reuses "
-            "its optical flow to extract features with other settings."
+            f"{run_dir} already holds a run (run_manifest.json); a run is never run twice or "
+            "overwritten. Create a new run, with reuse_from to reuse its verified optical flow."
         )
     settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
