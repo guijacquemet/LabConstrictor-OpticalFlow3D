@@ -27,7 +27,12 @@ MAX_FUNCTION_LINES = 60
 def executable_lines(node: ast.FunctionDef | ast.AsyncFunctionDef, lines: list[str]) -> int:
     """Count non-blank, non-comment lines of a function body after its docstring."""
     body = node.body
-    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
         body = body[1:]
     if not body:
         return 0
@@ -50,14 +55,20 @@ def size_violations() -> list[str]:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 count = executable_lines(node, lines)
                 if count > MAX_FUNCTION_LINES:
-                    found.append(f"{path.relative_to(ROOT)}:{node.lineno} {node.name}: {count} executable lines > {MAX_FUNCTION_LINES}")
+                    found.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno} {node.name}: "
+                        f"{count} executable lines > {MAX_FUNCTION_LINES}"
+                    )
     return found
 
 
 def main() -> int:
     """Run the checks and return the process exit code."""
-    targets = [str(PACKAGE.parent), str(TESTS), str(Path(__file__))]
-    steps = [[sys.executable, "-m", "ruff", "check", *targets], [sys.executable, "-m", "ruff", "format", "--check", *targets]]
+    targets = [str(PACKAGE.parent), str(TESTS), str(ROOT / "tools")]
+    steps = [
+        [sys.executable, "-m", "ruff", "check", *targets],
+        [sys.executable, "-m", "ruff", "format", "--check", *targets],
+    ]
     failed = False
     for step in steps:
         failed |= subprocess.run(step, cwd=ROOT, check=False).returncode != 0

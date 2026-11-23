@@ -37,8 +37,12 @@ BYTES_PER_VOXEL_PEAK = 288
 Measured with ``tracemalloc`` on 11x128x128 and 11x256x256 stacks with the default
 parameters (both 288 bytes per voxel); the input window comes on top.
 """
-SECONDS_PER_VOXEL = 1.2e-6
-"""Rough single-thread time per voxel and output frame on a 2020s x86-64 CPU."""
+SECONDS_PER_VOXEL = 2.3e-6
+"""Rough time per voxel and output frame.
+
+Measured: 83.5 s for one 7x11x1840x1840 uint16 window on a 4-vCPU cloud VM (peak RSS
+11.35 GB against an estimate of 11.25 GB), ``tools/benchmark_flow.py``.
+"""
 
 
 @dataclass(frozen=True)
