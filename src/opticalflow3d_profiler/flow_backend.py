@@ -28,12 +28,13 @@ from ._upstream import UPSTREAM_COMMIT, UPSTREAM_FILE_SHA256, UPSTREAM_REPOSITOR
 from .brightness import (
     brightness_change,
     equalise_window,
+    implementation_identity,
     match_histograms_window,
     window_means,
 )
 from .config import FlowParameters, ImageSpec, to_record
 from .image_io import ImageHeader, dimensions, file_identity, read_frames, validate_image
-from .progress import Tracker
+from .progress import Stage, Tracker
 from .validation import (
     InputError,
     check_time_and_depth,
@@ -200,7 +201,9 @@ def flow_identity(
     -------
     dict
         Input content hash, confirmed axes, dimensions, parameters, upstream
-        identity and the output-to-source frame map. Calibration is not part of it: it
+        identity and the output-to-source frame map; with a brightness correction, also the
+        correction code's identity (morphobricks-normalization version, commit and module
+        hash), so a changed correction never reuses cached flow. Calibration is not part of it: it
         does not change the saved velocities, which stay in voxels per frame.
     """
     dims = dimensions(spec, header)
@@ -212,6 +215,11 @@ def flow_identity(
         "parameters": to_record(params),
         "upstream": upstream_identity(),
         "frame_map": output_frame_map(dims["T"], params),
+        **(
+            {"brightness_correction": implementation_identity()}
+            if params.brightness_equalisation != "none"
+            else {}
+        ),
     }
 
 
@@ -294,6 +302,39 @@ def _write_tiff_hashed(path: Path, data: np.ndarray) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _compute_outputs(
+    spec: ImageSpec,
+    header: ImageHeader,
+    params: FlowParameters,
+    identity: dict[str, Any],
+    partial: Path,
+    name: str,
+    report: Callable[[str], None],
+    stage: Stage,
+) -> list[dict[str, Any]]:
+    """Compute, write and hash every optical-flow output into ``partial``; return the records."""
+    outputs = []
+    started = time.monotonic()
+    for index, t in enumerate(identity["frame_map"]):
+        half = params.half_window
+        window = read_frames(spec, header, list(range(t - half, t + half + 1)))
+        frame, brightness = flow_window(window, params)
+        del window
+        record = {"output_index": index, "source_frame": t, "files": {}, **brightness}
+        for component in frame:
+            file_name = f"{name}_{component}_t{t:04d}.tiff"
+            record["files"][component] = {
+                "name": file_name,
+                "dtype": str(frame[component].dtype),
+                "sha256": _write_tiff_hashed(partial / file_name, frame[component]),
+            }
+        outputs.append(record)
+        del frame
+        report(f"Source frame {t}: done ({time.monotonic() - started:.0f} s elapsed).")
+        stage.update(f"time point {t}")
+    return outputs
+
+
 def run_flow(
     spec: ImageSpec,
     header: ImageHeader,
@@ -343,29 +384,18 @@ def run_flow(
     identity = flow_identity(spec, header, params, source)
     partial = out_dir.with_name(out_dir.name + f".partial-{os.getpid()}")
     partial.mkdir(parents=True)
-    outputs = []
     started = time.monotonic()
     stage = (tracker or Tracker()).stage(
         f"Optical flow {name}", len(identity["frame_map"]), nested=True
     )
-    for index, t in enumerate(identity["frame_map"]):
-        half = params.half_window
-        window = read_frames(spec, header, list(range(t - half, t + half + 1)))
-        frame, brightness = flow_window(window, params)
-        del window
-        record = {"output_index": index, "source_frame": t, "files": {}, **brightness}
-        for component in frame:
-            file_name = f"{name}_{component}_t{t:04d}.tiff"
-            record["files"][component] = {
-                "name": file_name,
-                "dtype": str(frame[component].dtype),
-                "sha256": _write_tiff_hashed(partial / file_name, frame[component]),
-            }
-        outputs.append(record)
-        del frame
-        report(f"Source frame {t}: done ({time.monotonic() - started:.0f} s elapsed).")
-        stage.update(f"time point {t}")
-    stage.close()
+    try:
+        outputs = _compute_outputs(spec, header, params, identity, partial, name, report, stage)
+    except BaseException:
+        # Our own temporary folder: removed, so a later attempt starts clean.
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
+    finally:
+        stage.close()
     manifest = {
         "kind": "opticalflow3d_profiler.flow",
         "format_version": 1,

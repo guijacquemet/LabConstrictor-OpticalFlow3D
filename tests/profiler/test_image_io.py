@@ -133,3 +133,17 @@ def test_axes_named_by_the_header_cannot_be_reinterpreted(tmp_path):
     )
     with pytest.raises(InputError, match="axes_contradict_header"):
         validate_image(ImageSpec(tcyx, "TZYX"), inspect_tiff(tcyx))  # channels read as Z
+
+
+def test_ome_values_without_units_are_flagged(tmp_path):
+    path = tmp_path / "nounit.ome.tif"
+    tifffile.imwrite(
+        path,
+        np.zeros((7, 3, 8, 8), np.uint16),
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "TZYX", "TimeIncrement": 30.0, "PhysicalSizeX": 0.5},
+    )
+    header = inspect_tiff(path)
+    assert header.calibration_suggestion.frame_interval == pytest.approx(0.5)  # 30 s, OME default
+    assert any("TimeIncrement (unit not stated: OME default s)" in n for n in header.notes)

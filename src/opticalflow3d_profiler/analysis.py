@@ -15,6 +15,7 @@ import pandas as pd
 
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
+from .naming import SEPARATOR, feature_key
 from .validation import InputError
 
 
@@ -147,6 +148,14 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
                 )
         tables.append(_read_table(run, labels[run]))
     combined = pd.concat(tables, ignore_index=True)
+    keys = [feature_key(c) for c in combined.columns if SEPARATOR in c]
+    repeated = sorted({k for k in keys if keys.count(k) > 1})
+    if repeated:
+        raise InputError(
+            "Several columns share a feature key (two object sets in one table): "
+            + ", ".join(repeated)
+            + ". Combine runs extracted with the same foreground name."
+        )
     duplicated = combined["fov_uid"][combined["fov_uid"].duplicated()].unique()
     if len(duplicated):
         raise InputError("The same field of view appears in several runs: " + ", ".join(duplicated))

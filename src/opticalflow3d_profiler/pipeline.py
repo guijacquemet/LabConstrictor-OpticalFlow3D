@@ -121,25 +121,22 @@ def obtain_flow(
     Returns
     -------
     tuple
-        The result and its origin (``"computed"`` or ``"reused: <path>"``).
-
-    Raises
-    ------
-    InputError
-        When an earlier result exists but cannot be reused (it is never overwritten).
+        The result and its origin: ``"reused: <path>"``, or ``"computed"`` with, when an
+        earlier result was found but does not match (other inputs, settings or files), the
+        reason it was not reused. The earlier result is never modified.
     """
+    note = ""
     if reuse_from is not None and (Path(reuse_from) / "flow" / uid).is_dir():
         folder = Path(reuse_from) / "flow" / uid
         expected = flow_identity(spec, header, settings.flow, file_identity(spec.path))
         problems = verify_result(folder, expected)
-        if problems:
-            raise InputError(
-                f"The earlier optical flow in {folder} cannot be reused: " + " ".join(problems)
-            )
-        return open_result(folder), f"reused: {folder.as_posix()}"
+        if not problems:
+            return open_result(folder), f"reused: {folder.as_posix()}"
+        # A cache miss, never an overwrite: the earlier result stays as it is.
+        note = f" (earlier flow in {folder.as_posix()} not reused: {' '.join(problems)})"
     out = run_dir / "flow" / uid
     run_flow(spec, header, settings.flow, out, uid, progress=LOG.info, tracker=tracker)
-    return open_result(out), "computed"
+    return open_result(out), "computed" + note
 
 
 def frame_rows(
@@ -172,35 +169,39 @@ def frame_rows(
     rows = []
     dt = settings.calibration.frame_interval
     stage = (tracker or Tracker()).stage(f"Features {result.name}", len(result.frames), True)
-    for index, frame in enumerate(result.frames):
-        t = frame.source_frame
-        intensity = intensity_of(t) if intensity_of else None
-        features = frame_features(
-            frame.load(),
-            foreground_of(t, intensity),
-            intensity,
-            settings.calibration,
-            settings.features,
-        )
-        recorded = result.manifest.get("outputs", [{}] * (index + 1))[index]
-        features.put(
-            "qc_brightness_change_per_frame",
-            recorded.get("brightness_change_per_frame"),
-            "not recorded (optical flow from an older result)",
-        )
-        row: dict[str, object] = {
-            "fov_uid": result.name,
-            "output_index": index,
-            "t": t,
-            "time_min": t * dt if dt else None,
-        }
-        row.update(features.values)
-        row["undefined_features"] = "; ".join(
-            f"{k}: {v}" for k, v in sorted(features.undefined.items())
-        )
-        rows.append(row)
-        stage.update(f"time point {t}")
-    stage.close()
+    try:
+        for index, frame in enumerate(result.frames):
+            t = frame.source_frame
+            intensity = intensity_of(t) if intensity_of else None
+            features = frame_features(
+                frame.load(),
+                foreground_of(t, intensity),
+                intensity,
+                settings.calibration,
+                settings.features,
+            )
+            recorded = result.manifest.get("outputs", [{}] * (index + 1))[index]
+            features.put(
+                "qc_brightness_change_per_frame",
+                recorded.get("brightness_change_per_frame"),
+                "not recorded (optical flow from an older result)"
+                if "brightness_change_per_frame" not in recorded
+                else "undefined: the central frame's mean intensity is not above 0",
+            )
+            row: dict[str, object] = {
+                "fov_uid": result.name,
+                "output_index": index,
+                "t": t,
+                "time_min": t * dt if dt else None,
+            }
+            row.update(features.values)
+            row["undefined_features"] = "; ".join(
+                f"{k}: {v}" for k, v in sorted(features.undefined.items())
+            )
+            rows.append(row)
+            stage.update(f"time point {t}")
+    finally:
+        stage.close()
     return rows
 
 

@@ -117,17 +117,24 @@ def test_features_recomputed_from_verified_flow(experiment):
     assert not any((new / "flow").iterdir())  # nothing recomputed
 
 
-def test_flow_with_other_parameters_is_not_reused(experiment):
+def test_flow_with_other_parameters_is_recomputed_not_reused(experiment):
+    import hashlib
+
     root, metadata, run, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    old = run / "flow" / one["fov_uid"].iloc[0]
+    before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in old.iterdir()}
     new = create_run(root / "results", "run3")
     manifest = run_experiment(
-        metadata[metadata["position_id"] != "broken"].iloc[:1],
-        settings(flow=FlowParameters(mode="xyz", w_sig=2)),
-        new,
-        reuse_from=run,
+        one, settings(flow=FlowParameters(mode="xyz", w_sig=2)), new, reuse_from=run
     )
-    assert manifest["fovs"][0]["status"] == "failed"
-    assert "cannot be reused" in manifest["fovs"][0]["message"]
+    status = manifest["fovs"][0]
+    assert status["status"] == "complete"
+    assert status["flow_origin"].startswith("computed (earlier flow in")
+    assert "parameters" in status["flow_origin"]
+    assert (new / "flow" / one["fov_uid"].iloc[0] / "flow_manifest.json").is_file()
+    after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in old.iterdir()}
+    assert before == after  # the earlier result is untouched
 
 
 def test_morphocoverage_report_from_the_per_fov_table(experiment):
@@ -311,3 +318,19 @@ def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
         p.name: hashlib.sha256(p.read_bytes()).hexdigest()
         for p in (run / "run_manifest.json", run / "fovs.csv")
     }
+
+
+def test_default_readout_is_a_feature_with_values(experiment):
+    from dataclasses import replace as replace_set
+
+    from opticalflow3d_profiler.coverage import default_readout
+    from opticalflow3d_profiler.feature_dictionary import AXIAL, FeatureDef
+
+    _, _, run, _ = experiment
+    features = load_runs([run])
+    assert default_readout(features) == SPEED
+    speed_3d = "Nuclei__speed_3d_median"  # 3D speed without full calibration: all NaN
+    table = features.table.assign(**{speed_3d: float("nan")})
+    axial = FeatureDef(speed_3d, "magnitude", "", "", "lateral", "fov", "", AXIAL, "")
+    undefined = replace_set(features, table=table, fov_defs=[axial, *features.fov_defs])
+    assert default_readout(undefined) == SPEED

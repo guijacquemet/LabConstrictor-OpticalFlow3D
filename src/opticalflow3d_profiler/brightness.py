@@ -17,6 +17,9 @@ an optical-flow window with its **central frame as the reference**:
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import numpy as np
 from morphobricks_normalization import (
     TimeSeriesError,
@@ -25,6 +28,22 @@ from morphobricks_normalization import (
     frame_means,
     match_histograms,
 )
+
+from .results import distribution_identity
+
+
+def implementation_identity() -> dict[str, str | None]:
+    """Return the identity of the correction code (part of the flow identity when correcting).
+
+    The morphobricks-normalization version, its commit and the SHA-256 of its
+    ``time_series`` module.
+    """
+    from morphobricks_normalization import time_series
+
+    identity = distribution_identity("morphobricks-normalization")
+    source = Path(time_series.__file__).read_bytes()
+    return {**identity, "time_series_sha256": hashlib.sha256(source).hexdigest()}
+
 
 WARNING_CHANGE_PER_FRAME = 0.02
 """Relative brightness change per frame above which a field of view gets a warning."""

@@ -75,6 +75,26 @@ def read_manifest(folder: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _completeness(manifest: dict[str, Any]) -> list[str]:
+    """List what is missing for every planned output to be present with all its components."""
+    identity = manifest.get("identity", {})
+    planned = identity.get("frame_map")
+    outputs = manifest.get("outputs", [])
+    found = [o.get("source_frame") for o in outputs]
+    problems = []
+    if planned is not None and found != list(planned):
+        problems.append(f"The outputs cover source frames {found}, not the planned {planned}.")
+    per_slice = identity.get("parameters", {}).get("mode") == "xy_per_slice"
+    wanted = {"vx", "vy", "rel"} | (set() if per_slice else {"vz"})
+    for output in outputs:
+        if set(output.get("files", {})) != wanted:
+            problems.append(
+                f"Output {output.get('source_frame')} has the components "
+                f"{sorted(output.get('files', {}))}, not {sorted(wanted)}."
+            )
+    return problems
+
+
 def verify_result(folder: Path, expected_identity: dict[str, Any] | None = None) -> list[str]:
     """List the reasons why a saved result cannot be trusted or reused.
 
@@ -90,8 +110,9 @@ def verify_result(folder: Path, expected_identity: dict[str, Any] | None = None)
     Returns
     -------
     list of str
-        Empty when the manifest is consistent, every file exists with its recorded
-        SHA-256 and, if given, the identity matches exactly.
+        Empty when the manifest is consistent, every planned output (the identity's frame
+        map, in order) is listed with all its components, every file exists with its
+        recorded SHA-256 and, if given, the identity matches exactly.
     """
     try:
         manifest = read_manifest(folder)
@@ -107,6 +128,7 @@ def verify_result(folder: Path, expected_identity: dict[str, Any] | None = None)
             if expected_identity.get(k) != manifest["identity"].get(k)
         )
         problems.append(f"Different inputs or settings: {', '.join(changed)}.")
+    problems += _completeness(manifest)
     for output in manifest.get("outputs", []):
         for info in output["files"].values():
             path = Path(folder) / info["name"]

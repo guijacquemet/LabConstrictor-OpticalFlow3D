@@ -44,6 +44,16 @@ DEPENDENCIES = (
 )
 
 
+def distribution_identity(name: str) -> dict[str, str | None]:
+    """Return an installed distribution's version and, from a git install, its commit."""
+    try:
+        dist = importlib_metadata.distribution(name)
+    except importlib_metadata.PackageNotFoundError:
+        return {"version": None, "commit": None}
+    direct = json.loads(dist.read_text("direct_url.json") or "{}")
+    return {"version": dist.version, "commit": direct.get("vcs_info", {}).get("commit_id")}
+
+
 def create_run(parent: Path, name: str | None = None) -> Path:
     """Create a new, empty run folder.
 
