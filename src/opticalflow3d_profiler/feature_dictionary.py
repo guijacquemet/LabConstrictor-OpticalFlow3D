@@ -160,11 +160,11 @@ COLLECTIVE_ROWS = [
     ),
     (
         "xy_angular_entropy",
-        "Normalised Shannon entropy of XY directions (1 = uniform, 0 = one direction). One "
-        "bin is centred on the dominant direction, or without one on the first non-zero "
-        "circular moment whose order divides angle_bins, so rotating the image does not "
-        "change it.",
-        "-Σ p log p / log(angle_bins), one bin centred on θ_dom, else arg(m_k)/k",
+        "Normalised entropy of a smooth density of XY directions (1 = uniform, 0 = one "
+        "direction): a wrapped-normal kernel density with a standard deviation of "
+        "360°/angle_bins. No bins or anchor, so rotating the image does not change it and a "
+        "small change of one direction changes it a little.",
+        "(H - H_kernel) / (log 2π - H_kernel), H = -∫ p log p dθ of the kernel density",
         "1",
         "vx, vy",
         BIOLOGICAL,

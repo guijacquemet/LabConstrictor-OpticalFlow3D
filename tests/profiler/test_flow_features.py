@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from opticalflow3d_profiler.config import Calibration, FeatureSettings
 from opticalflow3d_profiler.flow_features import (
+    angular_entropy,
     frame_features,
     local_coherence_map,
     velocity_scale,
@@ -187,7 +188,7 @@ def test_angular_entropy_does_not_depend_on_image_orientation():
             np.sin(angles + np.deg2rad(rotation)),
         )
         values.append(features(f).values["xy_angular_entropy"])
-    assert max(values) - min(values) < 1e-9
+    assert max(values) - min(values) < 1e-6
 
 
 def test_angular_features_need_enough_directed_vectors():
@@ -220,23 +221,37 @@ def test_intensity_qc_is_opt_in_and_needs_a_foreground():
     assert features(flow(vx=1.0)).values["qc_region_grid_coverage"] == 1.0
 
 
-@pytest.mark.parametrize("rotation", [0.0, 2.0, 5.0, 37.0, 90.0])
-def test_angular_entropy_is_rotation_invariant_without_a_dominant_direction(rotation):
-    from opticalflow3d_profiler.flow_features import _angular_entropy, _entropy_anchor
-
-    base = np.deg2rad([-179.5, -1.5, 0.5, 178.5])  # antipodally balanced: no mean direction
-    reference = _angular_entropy(base, _entropy_anchor(base, None, 36), 36)
-    theta = np.angle(np.exp(1j * (base + np.deg2rad(rotation))))
-    assert abs(np.mean(np.exp(1j * theta))) < 1e-12
-    assert _angular_entropy(theta, _entropy_anchor(theta, None, 36), 36) == pytest.approx(
-        reference, abs=1e-12
-    )
+TWO_STREAMS = np.deg2rad(np.r_[np.full(20, -5.0), np.full(20, 5.0)])  # bin edges at 36 bins
 
 
-def test_angular_entropy_keeps_its_values_with_a_dominant_direction():
-    from opticalflow3d_profiler.flow_features import _angular_entropy, _entropy_anchor
+@pytest.mark.parametrize("rotation_deg", [10.0, 180.0, 5.0, 2.5, 1e-9, 37.0, -90.0])
+def test_angular_entropy_is_rotation_invariant_on_and_near_bin_edges(rotation_deg):
+    # Re-validation R1: -5° and +5° gave 0.193, the same streams turned by 10° gave 0.
+    reference = angular_entropy(TWO_STREAMS, 36)
+    assert 0 < reference < 1
+    turned = TWO_STREAMS + np.deg2rad(rotation_deg)
+    assert angular_entropy(turned, 36) == pytest.approx(reference, abs=1e-6)
+    for ulps in (1, 2):  # one or two ULPs off the rotated positions
+        nudged = np.nextafter(turned, turned + ulps)
+        assert angular_entropy(nudged, 36) == pytest.approx(reference, abs=1e-6)
 
-    theta = np.deg2rad([10.0, 12.0, 30.0, -40.0])
-    dominant = float(np.arctan2(np.mean(np.sin(theta)), np.mean(np.cos(theta))))
-    assert _entropy_anchor(theta, dominant, 36) == dominant
-    assert 0 < _angular_entropy(theta, dominant, 36) < 1
+
+def test_angular_entropy_is_continuous_and_bounded():
+    half = np.deg2rad([-25.0, -14, -10, 0, 4, 6, 12, 17, 26, 40])
+    balanced = np.r_[half, half + np.pi]  # mean resultant 0
+    nudged = balanced.copy()
+    nudged[-1] += 3e-11  # moved the resultant across the old 1e-12 threshold
+    assert angular_entropy(nudged, 36) == pytest.approx(angular_entropy(balanced, 36), abs=1e-9)
+    assert angular_entropy(np.deg2rad(np.full(30, 12.3456)), 36) == pytest.approx(0.0, abs=1e-6)
+    uniform = np.linspace(-np.pi, np.pi, 3600, endpoint=False)
+    assert angular_entropy(uniform, 36) == pytest.approx(1.0, abs=1e-9)
+    narrow, wide = (np.deg2rad(np.linspace(-s, s, 50)) for s in (10.0, 60.0))
+    assert angular_entropy(narrow, 36) < angular_entropy(wide, 36)
+
+
+def test_angular_entropy_is_defined_for_a_prime_resolution():
+    # Re-validation: 37 bins and two opposite streams gave no anchor, so NaN.
+    streams = np.deg2rad(np.r_[np.full(30, 10.0), np.full(30, 190.0)])
+    value = angular_entropy(streams, 37)
+    assert 0 < value < 1
+    assert angular_entropy(streams + 0.123, 37) == pytest.approx(value, abs=1e-6)

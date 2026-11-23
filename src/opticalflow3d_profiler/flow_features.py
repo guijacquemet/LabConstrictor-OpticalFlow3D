@@ -9,6 +9,8 @@ computed is ``NaN`` and its reason is returned alongside.
 
 from __future__ import annotations
 
+import functools
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -219,15 +221,7 @@ def _put_angles(row: FeatureRow, vx: np.ndarray, vy: np.ndarray, settings: Featu
     mean_cos, mean_sin = float(np.mean(np.cos(theta))), float(np.mean(np.sin(theta)))
     resultant = float(np.hypot(mean_cos, mean_sin))
     dominant = float(np.arctan2(mean_sin, mean_cos)) if resultant >= 1e-12 else None
-    anchor = _entropy_anchor(theta, dominant, settings.angle_bins)
-    if anchor is None:
-        row.put(
-            "xy_angular_entropy",
-            None,
-            "no orientation-free bin anchor (every circular moment dividing angle_bins is zero)",
-        )
-    else:
-        row.put("xy_angular_entropy", _angular_entropy(theta, anchor, settings.angle_bins))
+    row.put("xy_angular_entropy", angular_entropy(theta, settings.angle_bins))
     row.put("xy_angular_dispersion", 1.0 - resultant)
     if dominant is None:
         row.put("xy_aligned_fraction", None, "no dominant direction (mean resultant is zero)")
@@ -238,37 +232,58 @@ def _put_angles(row: FeatureRow, vx: np.ndarray, vy: np.ndarray, settings: Featu
     row.put("xy_dominant_direction_deg", float(np.rad2deg(dominant)))
 
 
-def _entropy_anchor(theta: np.ndarray, dominant: float | None, bins: int) -> float | None:
-    """Return the direction one entropy bin is centred on, or None when none is defined.
+ENTROPY_GRID = 2**16
+"""Points of the circle the direction density is evaluated on (spacing about 0.0055°)."""
 
-    The dominant direction (first circular moment) when there is one. Otherwise the first
-    non-zero circular moment of order ``k`` among the divisors of ``bins``,
-    ``arg(mean(exp(i k θ))) / k``: it turns with the vectors up to a multiple of ``2π / k``,
-    which is a whole number of bins, so the entropy does not change when every vector is
-    rotated (for example two opposite streams, whose first moment is zero).
+
+def angular_entropy(theta: np.ndarray, resolution_bins: int) -> float:
+    """Return the normalised entropy of a smooth density of directions (0 to 1).
+
+    The density is a wrapped-normal kernel density of the directions with a standard
+    deviation of one ``360° / resolution_bins``: a mixture of kernels centred on the
+    directions. Its differential entropy ``H = -∫ p log p dθ`` lies between the entropy of
+    one kernel ``H_k`` (every vector in one direction) and ``log 2π`` (uniform), since
+    entropy is concave, and is reported as ``(H - H_k) / (log 2π - H_k)``. Rotating every
+    vector shifts the density without changing ``H``, and moving one vector a little moves
+    the value a little: no bins, edges or anchor (re-validation R1). Computed on
+    :data:`ENTROPY_GRID` points: the directions are spread linearly between their two
+    nearest points, the kernel is applied by FFT, and ``H`` is the trapezoid sum, whose
+    error for a smooth periodic density is far below the grid spacing.
     """
-    if dominant is not None:
-        return dominant
-    for k in (d for d in range(2, bins + 1) if bins % d == 0):
-        moment = complex(np.mean(np.exp(1j * k * theta)))
-        if abs(moment) >= 1e-12:
-            return float(np.angle(moment)) / k
-    return None
+    h = _density_entropy(_grid_mass(theta), resolution_bins)
+    h_kernel = _kernel_entropy(resolution_bins)
+    top = np.log(2 * np.pi)
+    return float(np.clip((h - h_kernel) / (top - h_kernel), 0.0, 1.0))
 
 
-def _angular_entropy(theta: np.ndarray, anchor: float, bins: int) -> float:
-    """Return the normalised entropy of directions, with one bin centred on ``anchor``.
+@functools.lru_cache(maxsize=8)
+def _kernel_entropy(resolution_bins: int) -> float:
+    """Return the entropy of one kernel: every direction at one grid point."""
+    return _density_entropy(_grid_mass(np.zeros(1)), resolution_bins)
 
-    Centring the bins on a direction that turns with the vectors (:func:`_entropy_anchor`)
-    makes the value independent of the image orientation.
-    """
-    width = 2 * np.pi / bins
-    origin = anchor - width / 2
-    counts = np.bincount(
-        np.floor(np.mod(theta - origin, 2 * np.pi) / width).astype(int) % bins, minlength=bins
+
+def _grid_mass(theta: np.ndarray) -> np.ndarray:
+    """Return the share of directions at each grid point (linear spreading, sum 1)."""
+    position = np.mod(np.asarray(theta, dtype=np.float64), 2 * np.pi) * (
+        ENTROPY_GRID / (2 * np.pi)
     )
-    p = counts[counts > 0] / theta.size
-    return float(-np.sum(p * np.log(p)) / np.log(bins))
+    low = np.floor(position)
+    upper = position - low
+    low = low.astype(np.int64) % ENTROPY_GRID
+    mass = np.bincount(low, weights=1.0 - upper, minlength=ENTROPY_GRID)
+    mass += np.bincount((low + 1) % ENTROPY_GRID, weights=upper, minlength=ENTROPY_GRID)
+    return mass / mass.sum()
+
+
+def _density_entropy(mass: np.ndarray, resolution_bins: int) -> float:
+    """Return ``-∫ p log p dθ`` of the wrapped-normal kernel density of grid masses."""
+    sigma = 2 * np.pi / resolution_bins
+    order = np.arange(ENTROPY_GRID // 2 + 1)
+    spectrum = np.fft.rfft(mass) * np.exp(-0.5 * (order * sigma) ** 2)
+    step = 2 * np.pi / ENTROPY_GRID
+    density = np.fft.irfft(spectrum, ENTROPY_GRID) / step
+    positive = density[density > 0]
+    return float(-np.sum(positive * np.log(positive)) * step)
 
 
 def local_coherence_map(
