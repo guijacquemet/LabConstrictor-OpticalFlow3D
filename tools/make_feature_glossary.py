@@ -105,7 +105,8 @@ def glossary_markdown() -> str:
         "Every column of the feature tables, what it measures, how it is computed and when it "
         "is left empty. The same definitions are written into every run as "
         "`features/feature_dictionary.json`. For the method behind them see "
-        "[How it works](theory.md); for interpretation see [Interpreting results](concepts.md).",
+        "[How it works](theory.md); for interpretation see "
+        "[Interpreting results](results.md#interpreting-results).",
         "",
         "## How to read the tables",
         "",

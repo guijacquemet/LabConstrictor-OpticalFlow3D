@@ -3,7 +3,7 @@
 [:arrow_left: Documentation index](index.md)
 
 This page describes every calculation, from the image to the condition comparison. For what the
-numbers mean in practice, see [Interpreting results](concepts.md); for every column, the
+numbers mean in practice, see [Interpreting results](results.md#interpreting-results); for every column, the
 [Feature glossary](features.md).
 
 **Notation.** `I(x, y, z, t)` is the raw intensity. `vx`, `vy`, `vz` are the velocity components.
@@ -124,7 +124,7 @@ vz [µm/min] = vz [slice/frame] × pixel_size_z / frame_interval
   slices are different lengths.
 
 Scaling converts units only. It does not remove the optical-flow gain bias
-([Limitations](limitations.md)). The units of a run are written in
+([Limitations](results.md#limitations)). The units of a run are written in
 `features/feature_dictionary.json` (`units`).
 
 ---
@@ -374,7 +374,7 @@ MorphoCoverage's own documentation describes a paired t-test on the repeat means
 Benjamini–Hochberg correction. For anything beyond this, refer to MorphoCoverage's documentation.
 
 Because fields of view of one biological repeat are not independent, only the paired test on
-repeat means says whether an effect repeats ([Interpreting results](concepts.md)).
+repeat means says whether an effect repeats ([Interpreting results](results.md#interpreting-results)).
 
 ---
 
