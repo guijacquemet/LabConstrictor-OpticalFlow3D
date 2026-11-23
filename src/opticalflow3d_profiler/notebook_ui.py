@@ -40,6 +40,7 @@ from .flow_store import open_result
 from .image_io import ImageHeader, dimensions, inspect_tiff, read_frames, validate_image
 from .naming import find_column
 from .pipeline import RunSettings, run_experiment
+from .progress import TqdmTracker
 from .results import create_run
 from .validation import (
     InputError,
@@ -50,6 +51,8 @@ from .validation import (
 )
 
 WIDE = widgets.Layout(width="90%")
+# Progress is shown by the bars; the lines go to the run's log file only.
+LOG_ONLY = lambda _line: None  # noqa: E731
 STYLE = {"description_width": "180px"}
 
 
@@ -385,7 +388,7 @@ class SettingsStep:
         metadata = self.session.metadata
         one = metadata[metadata["fov_uid"] == row["fov_uid"]]
         run = create_run(self.session.results_root / "examples")
-        manifest = run_experiment(one, settings, run, progress=print)
+        manifest = run_experiment(one, settings, run, progress=LOG_ONLY, tracker=TqdmTracker())
         self.session.settings = settings
         status = manifest["fovs"][0]
         print(f"Example run: {run}\nStatus: {status['status']} {status['message']}")

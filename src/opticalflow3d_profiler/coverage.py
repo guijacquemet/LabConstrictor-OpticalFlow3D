@@ -27,6 +27,7 @@ import pandas as pd
 
 from .analysis import FeatureSet
 from .naming import find_column
+from .progress import Tracker
 from .temporal_features import pca_eligible
 from .validation import InputError
 
@@ -127,7 +128,7 @@ def coverage_input(features: FeatureSet, design: Design) -> CoverageInput:
 
 
 def run_report(
-    features: FeatureSet, design: Design, out_dir: Path
+    features: FeatureSet, design: Design, out_dir: Path, tracker: Tracker | None = None
 ) -> tuple[Path, Any, CoverageInput]:
     """Run MorphoCoverage's report and write its full HTML page into a new folder.
 
@@ -139,6 +140,8 @@ def run_report(
         The confirmed design.
     out_dir
         New folder for ``report.html``, its figures and data (never overwritten).
+    tracker
+        Optional progress display: the design scan, the statistics, the HTML page.
 
     Returns
     -------
@@ -157,7 +160,9 @@ def run_report(
     if out_dir.exists():
         raise InputError(f"{out_dir} exists; reports are never overwritten.")
     data = coverage_input(features, design)
+    stage = (tracker or Tracker()).stage("MorphoCoverage", 3)
     scan = scan_design(data.objects, data.fovs)
+    stage.update("design scanned")
     setup = scan.setup(
         readout=design.readout,
         control={"condition": design.control},
@@ -166,8 +171,11 @@ def run_report(
         random_state=design.random_state,
     )
     result = report(scan.objects, scan.fovs, setup)
+    stage.update("statistics done")
     out_dir.mkdir(parents=True)
     data.objects.to_csv(out_dir / "morphocoverage_objects.csv", index=False)
     data.fovs.to_csv(out_dir / "morphocoverage_fovs.csv", index=False)
     path = html_report(result, scan.objects, scan.fovs, out_dir, title=REPORT_TITLE)
+    stage.update("report written")
+    stage.close()
     return path, result, data

@@ -23,6 +23,7 @@ from .coverage import Design, coverage_input, default_readout, feature_columns, 
 from .demo import DemoDesign, run_demo
 from .experiment import replicate_counts
 from .notebook_ui import (
+    LOG_ONLY,
     STYLE,
     WIDE,
     LoadStep,
@@ -33,6 +34,7 @@ from .notebook_ui import (
     text,
 )
 from .pipeline import run_experiment
+from .progress import TqdmTracker
 from .qc_export import export_qc_figures
 from .report_link import show_link
 from .results import create_run
@@ -61,15 +63,17 @@ class ProcessStep:
             raise InputError("Load the experiment in section 1 first.")
         settings = self.settings.run_settings()
         run = create_run(session.results_root, self.run_name.value.strip() or None)
-        manifest = run_experiment(session.metadata, settings, run, progress=print)
+        print(f"Run folder: {run}")
+        manifest = run_experiment(
+            session.metadata, settings, run, progress=LOG_ONLY, tracker=TqdmTracker()
+        )
         session.run_dir, session.settings = run, settings
         fovs = pd.DataFrame(manifest["fovs"])
-        print(f"Run folder: {run}")
         display(fovs[["fov_uid", "status", "warnings", "message"]])
         failed = int((fovs["status"] != "complete").sum())
         print(f"{len(fovs) - failed} complete, {failed} failed (listed above, never skipped).")
         if self.qc.value and failed < len(fovs):
-            written = export_qc_figures(run, settings)
+            written = export_qc_figures(run, settings, tracker=TqdmTracker())
             print(f"{len(written)} QC figures saved in {run / 'qc'}.")
         if (run / "features" / "features_per_frame.csv").exists():
             print("Tables: features_per_frame.csv (every time point), features_per_fov.csv.")
@@ -202,8 +206,7 @@ class ReportStep:
             raise InputError("Confirm the experimental design first.")
         features = analysis["features"]
         out = Path(features.sources[0]) / "analysis" / self.name.value.strip()
-        print("Running MorphoCoverage (about a minute for a few dozen fields of view)...")
-        path, result, _ = run_report(features, analysis["design"], out)
+        path, result, _ = run_report(features, analysis["design"], out, TqdmTracker())
         analysis["report"] = result
         print(result.summary().split("\n\n")[1] if "\n\n" in result.summary() else "")
         show_link(path)
@@ -229,7 +232,9 @@ class DemoStep:
         if not self.folder.value.strip():
             raise InputError("Choose a new, empty folder.")
         design = DemoDesign.small() if self.small.value else None
-        checks = run_demo(Path(self.folder.value.strip()), design, progress=lambda _l: None)
+        checks = run_demo(
+            Path(self.folder.value.strip()), design, progress=print, tracker=TqdmTracker()
+        )
         display(pd.DataFrame(checks.rows))
         print("All expectations passed." if checks.passed else "Some expectations FAILED.")
         report = Path(self.folder.value.strip()) / "results" / "run-threshold" / "analysis"

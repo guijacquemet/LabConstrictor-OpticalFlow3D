@@ -27,6 +27,7 @@ from .flow_store import FlowResult, open_result, verify_result
 from .foreground import describe, threshold_frame
 from .image_io import ImageHeader, dimensions, file_identity, inspect_tiff, read_frames
 from .naming import ColumnNames
+from .progress import Tracker
 from .results import environment, now, relative, write_csv, write_json
 from .temporal_features import aggregate_fov, fov_dictionary
 from .validation import (
@@ -99,6 +100,7 @@ def obtain_flow(
     run_dir: Path,
     uid: str,
     reuse_from: Path | None,
+    tracker: Tracker | None = None,
 ) -> tuple[FlowResult, str]:
     """Return the verified optical flow of one field of view, computing it if needed.
 
@@ -114,6 +116,8 @@ def obtain_flow(
         Field-of-view identifier.
     reuse_from
         Earlier run folder whose ``flow/<uid>`` may be reused.
+    tracker
+        Optional progress display of the optical-flow windows.
 
     Returns
     -------
@@ -135,7 +139,7 @@ def obtain_flow(
             )
         return open_result(folder), f"reused: {folder.as_posix()}"
     out = run_dir / "flow" / uid
-    run_flow(spec, header, settings.flow, out, uid, progress=LOG.info)
+    run_flow(spec, header, settings.flow, out, uid, progress=LOG.info, tracker=tracker)
     return open_result(out), "computed"
 
 
@@ -144,6 +148,7 @@ def frame_rows(
     settings: RunSettings,
     foreground_of: Callable,
     intensity_of: Callable | None,
+    tracker: Tracker | None = None,
 ) -> list[dict[str, object]]:
     """Compute the feature rows of every output of a flow result, one frame at a time.
 
@@ -157,6 +162,8 @@ def frame_rows(
         ``source_frame -> boolean ZYX or None``.
     intensity_of
         ``source_frame -> ZYX intensities`` or ``None``.
+    tracker
+        Optional progress display of the frames.
 
     Returns
     -------
@@ -165,6 +172,7 @@ def frame_rows(
     """
     rows = []
     dt = settings.calibration.frame_interval
+    stage = (tracker or Tracker()).stage(f"Features {result.name}", len(result.frames), True)
     for index, frame in enumerate(result.frames):
         t = frame.source_frame
         intensity = intensity_of(t) if intensity_of else None
@@ -192,6 +200,8 @@ def frame_rows(
             f"{k}: {v}" for k, v in sorted(features.undefined.items())
         )
         rows.append(row)
+        stage.update(f"time point {t}")
+    stage.close()
     return rows
 
 
@@ -231,6 +241,7 @@ def process_fov(
     run_dir: Path,
     reuse_from: Path | None = None,
     flow_only: bool = False,
+    tracker: Tracker | None = None,
 ) -> FovOutcome:
     """Run optical flow and feature extraction for one metadata row.
 
@@ -246,6 +257,8 @@ def process_fov(
         Earlier run folder for verified flow reuse.
     flow_only
         Stop after the optical flow (status ``flow complete``).
+    tracker
+        Optional progress display (nested bars of this field of view).
 
     Returns
     -------
@@ -273,7 +286,7 @@ def process_fov(
             for i in check_time_and_depth(dims["T"], dims["Z"], settings.flow)
             if i.severity == "warning"
         ]
-        result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from)
+        result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from, tracker)
         warnings += [
             w
             for w in [brightness_warning(result, settings.flow.brightness_equalisation != "none")]
@@ -290,7 +303,7 @@ def process_fov(
         fg_spec = settings.foreground
         foreground_of, fg_record = foreground_reader(fg_spec, dims)
         rows = frame_rows(
-            result, settings, foreground_of, lambda t: read_frames(spec, header, [t])[0]
+            result, settings, foreground_of, lambda t: read_frames(spec, header, [t])[0], tracker
         )
         if fg_spec.mode == "none":
             warnings.append(fg_record["warning"])
@@ -391,6 +404,7 @@ def run_experiment(
     reuse_from: Path | None = None,
     progress: Callable[[str], None] | None = None,
     flow_only: bool = False,
+    tracker: Tracker | None = None,
 ) -> dict[str, object]:
     """Process every field of view of a validated metadata table into a run folder.
 
@@ -412,6 +426,9 @@ def run_experiment(
         Optional callback for one line per field of view.
     flow_only
         Calculate and verify the optical flow only.
+    tracker
+        Optional progress display (:mod:`~opticalflow3d_profiler.progress`): one bar over
+        the fields of view, nested bars over each one's flow windows and feature frames.
 
     Returns
     -------
@@ -441,12 +458,16 @@ def run_experiment(
     LOG.setLevel(logging.INFO)
     started = now()
     outcomes = []
+    tracker = tracker or Tracker()
+    stage = tracker.stage("Fields of view", len(metadata))
     try:
         for row in metadata.to_dict("records"):
             (progress or LOG.info)(f"Processing {row['fov_uid']}...")
-            outcomes.append(process_fov(row, settings, run_dir, reuse_from, flow_only))
+            outcomes.append(process_fov(row, settings, run_dir, reuse_from, flow_only, tracker))
             (progress or LOG.info)(f"{row['fov_uid']}: {outcomes[-1].status['status']}")
+            stage.update(f"{row['position_id']}: {outcomes[-1].status['status']}")
     finally:
+        stage.close()
         LOG.removeHandler(handler)
         handler.close()
     rows = [r for o in outcomes for r in o.rows]

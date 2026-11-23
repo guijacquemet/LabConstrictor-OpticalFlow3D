@@ -32,6 +32,7 @@ from .experiment import read_experiment_folder
 from .flow_store import open_result
 from .naming import ColumnNames
 from .pipeline import RunSettings, run_experiment
+from .progress import Tracker
 from .qc_export import export_qc_figures
 from .results import create_run, write_csv, write_text_atomic
 from .synthetic import SyntheticMovie, render
@@ -247,12 +248,17 @@ def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
     return per_fov
 
 
-def check_analysis(checks: Checks, run: Path, out: Path, design: DemoDesign) -> None:
+def check_analysis(
+    checks: Checks, run: Path, out: Path, design: DemoDesign, tracker: Tracker | None = None
+) -> None:
     """Run MorphoCoverage on the run and check its verdict on coherence (drug vs ctrl)."""
     features = load_runs([run])
     coherence_column = NAMES.column("coherence_xy_global")
     path, result, _ = run_report(
-        features, Design("ctrl", NAMES.column("speed_xy_median"), repeats_paired=True), out
+        features,
+        Design("ctrl", NAMES.column("speed_xy_median"), repeats_paired=True),
+        out,
+        tracker,
     )
     checks.add(
         "MorphoCoverage report written",
@@ -307,7 +313,10 @@ def markdown_table(table: pd.DataFrame) -> str:
 
 
 def run_demo(
-    folder: Path, design: DemoDesign | None = None, progress: Callable[[str], None] = print
+    folder: Path,
+    design: DemoDesign | None = None,
+    progress: Callable[[str], None] = print,
+    tracker: Tracker | None = None,
 ) -> Checks:
     """Write the synthetic experiment, run every step and check the results.
 
@@ -319,6 +328,8 @@ def run_demo(
         Experiment size and content (default: 256 x 256 x 11 x 15, 12 fields of view).
     progress
         Callback for progress lines.
+    tracker
+        Optional progress bars (fields of view, flow windows, features, report).
 
     Returns
     -------
@@ -345,15 +356,15 @@ def run_demo(
     )
     run = create_run(folder / "results", "run-threshold")
     progress("Step 2: optical flow...")
-    run_experiment(metadata, settings, run, progress=progress, flow_only=True)
+    run_experiment(metadata, settings, run, progress=progress, flow_only=True, tracker=tracker)
     progress("Step 3: features (intensity-threshold foreground)...")
-    run_experiment(metadata, settings, run, reuse_from=run, progress=progress)
+    run_experiment(metadata, settings, run, reuse_from=run, progress=progress, tracker=tracker)
     progress("Saving QC figures...")
     export_qc_figures(run, settings)
     checks = Checks()
     check_run(checks, run, design)
     progress("Section 4: MorphoCoverage report...")
-    check_analysis(checks, run, run / "analysis" / "demo", design)
+    check_analysis(checks, run, run / "analysis" / "demo", design, tracker)
     progress("Re-extraction on the whole image (reusing the flow)...")
     whole_run = create_run(folder / "results", "run-whole-image")
     run_experiment(

@@ -33,6 +33,7 @@ from .brightness import (
 )
 from .config import FlowParameters, ImageSpec, to_record
 from .image_io import ImageHeader, dimensions, file_identity, read_frames, validate_image
+from .progress import Tracker
 from .validation import (
     InputError,
     check_time_and_depth,
@@ -301,6 +302,7 @@ def run_flow(
     out_dir: Path,
     name: str,
     progress: Callable[[str], None] | None = None,
+    tracker: Tracker | None = None,
 ) -> dict[str, Any]:
     """Calculate and save optical flow for one field of view.
 
@@ -316,6 +318,8 @@ def run_flow(
         File-name prefix of the outputs (the field-of-view identifier).
     progress
         Optional callback receiving one line of text per step.
+    tracker
+        Optional progress display: one step per optical-flow time window.
 
     Returns
     -------
@@ -342,6 +346,9 @@ def run_flow(
     partial.mkdir(parents=True)
     outputs = []
     started = time.monotonic()
+    stage = (tracker or Tracker()).stage(
+        f"Optical flow {name}", len(identity["frame_map"]), nested=True
+    )
     for index, t in enumerate(identity["frame_map"]):
         half = params.half_window
         window = read_frames(spec, header, list(range(t - half, t + half + 1)))
@@ -358,6 +365,8 @@ def run_flow(
         outputs.append(record)
         del frame
         report(f"Source frame {t}: done ({time.monotonic() - started:.0f} s elapsed).")
+        stage.update(f"time point {t}")
+    stage.close()
     manifest = {
         "kind": "opticalflow3d_profiler.flow",
         "format_version": 1,

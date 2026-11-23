@@ -255,3 +255,30 @@ def test_feature_settings_are_checked_before_any_computation(experiment, tmp_pat
     with pytest.raises(InputError, match="needs a value"):
         run_experiment(metadata, bad, run)
     assert not any((run / "flow").iterdir())
+
+
+def test_progress_is_reported_per_fov_flow_window_and_frame(experiment, tmp_path):
+    from opticalflow3d_profiler.progress import Stage, Tracker
+
+    class Recorder(Tracker):
+        def __init__(self):
+            self.stages = []
+
+        def stage(self, description, total, nested=False):
+            record = {"name": description, "total": total, "done": 0}
+            self.stages.append(record)
+
+            class Counting(Stage):
+                def update(self, note=""):
+                    record["done"] += 1
+
+            return Counting()
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    recorder = Recorder()
+    run_experiment(one, settings(), create_run(tmp_path, "progress"), tracker=recorder)
+    names = [s["name"].split()[0] for s in recorder.stages]
+    assert names == ["Fields", "Optical", "Features"]
+    assert all(s["done"] == s["total"] for s in recorder.stages)
+    assert recorder.stages[1]["total"] == 3  # 9 frames, tSig 1: 3 flow windows

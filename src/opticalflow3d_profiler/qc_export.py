@@ -27,6 +27,7 @@ from .flow_store import open_result
 from .image_io import dimensions, inspect_tiff, read_frames
 from .naming import find_column
 from .pipeline import RunSettings, foreground_reader
+from .progress import Tracker
 from .validation import InputError
 
 QC_DPI = 120
@@ -114,7 +115,9 @@ def export_fov(
     return written
 
 
-def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None) -> list[Path]:
+def export_qc_figures(
+    run_dir: Path, settings: RunSettings, z: int | None = None, tracker: Tracker | None = None
+) -> list[Path]:
     """Save QC figures for every completed field of view of a run.
 
     Parameters
@@ -125,6 +128,8 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
         The run's settings.
     z
         Z slice to show; default is the middle slice.
+    tracker
+        Optional progress display (one step per field of view).
 
     Returns
     -------
@@ -144,6 +149,7 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
     table = run_dir / "features" / "features_per_frame.csv"
     frames = pd.read_csv(table) if table.exists() else None
     written: list[Path] = []
+    stage = (tracker or Tracker()).stage("QC figures", len(done))
     for status in done.to_dict("records"):
         written += export_fov(run_dir, status, settings, z)
         if frames is not None:
@@ -159,6 +165,8 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
                 dpi=QC_DPI,
             )
             written.append(path)
+        stage.update(str(status["position_id"]))
+    stage.close()
     if frames is not None:
         path = run_dir / "qc" / "feature_histograms.png"
         figures.save(
