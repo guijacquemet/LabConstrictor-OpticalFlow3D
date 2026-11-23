@@ -112,7 +112,10 @@ def test_foreground_restricts_measurement_and_reports_occupancy():
     f["vx"][:, :, 16:] = 5.0
     fg = np.zeros(SHAPE, bool)
     fg[:, :, :16] = True
-    row = features(f, foreground=fg, intensity=np.full(SHAPE, 7.0))
+    with_intensity = FeatureSettings(
+        reliability_mode="none", region_size_px=16, min_region_voxels=10, intensity_features=True
+    )
+    row = features(f, with_intensity, foreground=fg, intensity=np.full(SHAPE, 7.0))
     assert row.values["speed_xy_max"] == pytest.approx(1.0)
     assert row.values["qc_foreground_fraction"] == pytest.approx(0.5)
     assert row.values["qc_foreground_intensity_mean"] == 7.0
@@ -208,8 +211,10 @@ def test_sparse_windows_have_no_local_coherence():
     assert np.nanmax(local_coherence_map(vx, np.zeros(SHAPE), mask, 5, min_vectors=1)) == 1.0
 
 
-def test_intensity_qc_needs_a_foreground():
-    row = features(flow(vx=1.0), intensity=np.full(SHAPE, 7.0))
+def test_intensity_qc_is_opt_in_and_needs_a_foreground():
+    assert "qc_foreground_intensity_mean" not in features(flow(vx=1.0)).values
+    settings = FeatureSettings(reliability_mode="none", intensity_features=True)
+    row = features(flow(vx=1.0), settings, intensity=np.full(SHAPE, 7.0))
     assert np.isnan(row.values["qc_foreground_intensity_mean"])
     assert "no foreground" in row.undefined["qc_foreground_intensity_mean"]
-    assert row.values["qc_region_grid_coverage"] == 1.0
+    assert features(flow(vx=1.0)).values["qc_region_grid_coverage"] == 1.0

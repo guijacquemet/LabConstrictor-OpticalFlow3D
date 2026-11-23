@@ -73,6 +73,9 @@ class FeatureStep:
         self.region = widgets.IntText(value=128, description="Region size (px)", style=STYLE)
         self.window = widgets.IntText(value=15, description="Local window (px)", style=STYLE)
         self.motion = text("Moving-region threshold", placeholder="optional, feature units")
+        self.intensity = widgets.Checkbox(
+            description="Also report intensity-based QC (opt-in)", style=STYLE
+        )
         self.new_run = text("New run name (re-extraction)", placeholder="optional")
         self.output = widgets.Output()
 
@@ -94,6 +97,7 @@ class FeatureStep:
                 self.speed,
                 widgets.HBox([self.region, self.window]),
                 self.motion,
+                self.intensity,
                 self.new_run,
                 widgets.HBox([run, qc]),
                 self.output,
@@ -119,6 +123,7 @@ class FeatureStep:
             region_size_px=self.region.value,
             local_window_px=self.window.value,
             motion_threshold=number(self.motion.value),
+            intensity_features=self.intensity.value,
         )
         mask = self.mask_path.value.strip()
         foreground = ForegroundSpec(

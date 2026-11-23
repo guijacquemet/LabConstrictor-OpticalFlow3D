@@ -353,13 +353,19 @@ def _quality() -> list[FeatureDef]:
     return _rows("quality", rows, "no foreground voxel, or input not supplied")
 
 
-def frame_dictionary(mode: SpeedMode) -> list[FeatureDef]:
+INTENSITY_COLUMNS = ("qc_foreground_intensity_mean",)
+"""Intensity-based columns, reported only with ``FeatureSettings.intensity_features``."""
+
+
+def frame_dictionary(mode: SpeedMode, intensity: bool = False) -> list[FeatureDef]:
     """Return the definitions of every per-frame feature column for a speed mode.
 
     Parameters
     ----------
     mode
         ``"xy"`` or ``"xyz"``.
+    intensity
+        Include the intensity-based columns (:data:`INTENSITY_COLUMNS`).
 
     Returns
     -------
@@ -371,7 +377,7 @@ def frame_dictionary(mode: SpeedMode) -> list[FeatureDef]:
         *_components(mode),
         *_rows("collective", COLLECTIVE_ROWS),
         *_rows("spatial", SPATIAL_ROWS),
-        *_quality(),
+        *[d for d in _quality() if intensity or d.name not in INTENSITY_COLUMNS],
     ]
 
 

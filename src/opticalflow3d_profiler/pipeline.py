@@ -305,7 +305,7 @@ def process_fov(
 
 def fov_table(frame_table: pd.DataFrame, settings: RunSettings) -> pd.DataFrame:
     """Aggregate the per-frame table into ``features_per_fov`` (one row per FOV)."""
-    defs = frame_dictionary(settings.features.speed_mode)
+    defs = frame_dictionary(settings.features.speed_mode, settings.features.intensity_features)
     rows = []
     for uid, group in frame_table.groupby("fov_uid", sort=True):
         group = group.sort_values("source_frame")
@@ -335,7 +335,7 @@ def write_feature_tables(
     pandas.DataFrame
         The per-FOV table with the metadata columns first.
     """
-    defs = frame_dictionary(settings.features.speed_mode)
+    defs = frame_dictionary(settings.features.speed_mode, settings.features.intensity_features)
     time_unit = "min" if settings.calibration.frame_interval else "frame"
     per_fov = fov_table(frame_table, settings)
     meta = metadata[[c for c in METADATA_COLUMNS if c in metadata.columns]]
