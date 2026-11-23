@@ -21,6 +21,26 @@ from .feature_dictionary import FeatureDef
 from .temporal_features import pca_eligible
 
 MissingPolicy = Literal["drop_features", "drop_fovs"]
+Selection = Literal["core", "families"]
+CORE_FEATURES = (
+    "speed_xy_median__tmean",
+    "speed_xy_p90__tmean",
+    "speed_xy_cv__tmean",
+    "speed_xy_median__tsd",
+    "coherence_xy_global__tmean",
+    "coherence_xy_global__tsd",
+    "coherence_xy_local__tmean",
+    "xy_angular_dispersion__tmean",
+    "xy_angular_entropy__tmean",
+    "xy_aligned_fraction__tmean",
+    "regional_speed_cv__tmean",
+    "regional_coherence_sd__tmean",
+)
+"""Default PCA inputs: one column per interpretable property (amplitude, upper tail,
+heterogeneity, temporal variation, collective motion, spatial heterogeneity), instead of
+many strongly correlated representations of the same one. ``speed_xy`` becomes
+``speed_3d`` in XYZ mode."""
+CORE_AXIAL = ("vz_abs_mean__tmean", "axial_lateral_ratio__tmean", "coherence_3d_global__tmean")
 MIN_REPEATS_PER_CONDITION = 3
 
 
@@ -30,9 +50,12 @@ class PcaSettings:
 
     Attributes
     ----------
+    selection
+        ``"core"`` (default): the interpretable :data:`CORE_FEATURES`. ``"families"``: every
+        eligible column of the chosen families (many are strongly correlated).
     families
         Feature families to include (``magnitude``, ``components``, ``collective``,
-        ``spatial``).
+        ``spatial``); with ``"core"``, core columns outside these families are left out.
     include_axial
         Also include experimental axial (Z-dependent) features.
     missing
@@ -43,6 +66,7 @@ class PcaSettings:
     """
 
     families: tuple[str, ...] = ("magnitude", "components", "collective", "spatial")
+    selection: Selection = "core"
     include_axial: bool = False
     missing: MissingPolicy = "drop_features"
     n_components: int = 5
@@ -90,6 +114,8 @@ def select_inputs(
         Selected column names (dictionary order) and exclusions with reasons.
     """
     selected, excluded = [], []
+    core = set(CORE_FEATURES) | set(CORE_AXIAL)
+    core |= {c.replace("speed_xy", "speed_3d") for c in CORE_FEATURES}
     for d in fov_defs:
         if d.name not in table.columns:
             continue
@@ -97,6 +123,8 @@ def select_inputs(
             excluded.append({"feature": d.name, "reason": f"applicability {d.applicability}"})
         elif d.family not in settings.families:
             excluded.append({"feature": d.name, "reason": f"family {d.family} not selected"})
+        elif settings.selection == "core" and d.name not in core:
+            excluded.append({"feature": d.name, "reason": "not in the core feature set"})
         else:
             selected.append(d.name)
     return selected, excluded
@@ -165,8 +193,9 @@ def prepare_matrix(
 def design_warnings(metadata: pd.DataFrame, n_features: int) -> list[str]:
     """Return warnings about the experimental design behind a PCA."""
     found = ["PCA is an exploratory visualisation, not a significance test."]
-    if "condition" in metadata.columns and "biological_repeat" in metadata.columns:
-        repeats = metadata.groupby("condition")["biological_repeat"].nunique()
+    column = "repeat_id" if "repeat_id" in metadata.columns else "biological_repeat"
+    if "condition" in metadata.columns and column in metadata.columns:
+        repeats = metadata.groupby("condition")[column].nunique()
         few = repeats[repeats < MIN_REPEATS_PER_CONDITION]
         if not few.empty:
             found.append(
@@ -175,6 +204,14 @@ def design_warnings(metadata: pd.DataFrame, n_features: int) -> list[str]:
                 + ". Fields of view of one repeat are "
                 "not independent; separation in PCA cannot be interpreted as a reproducible "
                 "condition effect."
+            )
+    if column in metadata.columns:
+        per_repeat = metadata.groupby(column).size()
+        if per_repeat.nunique() > 1:
+            found.append(
+                "Biological repeats have different numbers of fields of view "
+                f"({per_repeat.min()}-{per_repeat.max()}); the PCA is fitted on fields "
+                "of view, so repeats with more fields weigh more."
             )
     if len(metadata) <= n_features:
         found.append(

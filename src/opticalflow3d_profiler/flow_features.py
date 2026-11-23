@@ -39,10 +39,12 @@ class VelocityScale:
 
     @property
     def consistent(self) -> bool:
-        """Return True when lateral and axial velocities share one unit."""
-        return self.lateral_unit == self.axial_unit or (
-            self.lateral_unit == "px/frame" and self.axial_unit == "slice/frame"
-        )
+        """Return True when lateral and axial velocities share one physical unit.
+
+        Pixels and slices are different lengths, so uncalibrated velocities never share a
+        unit: 3D speed, 3D coherence and the axial/lateral ratio need X, Y, Z and time.
+        """
+        return self.lateral_unit == self.axial_unit == "µm/min"
 
 
 def velocity_scale(calibration: Calibration) -> VelocityScale:
@@ -114,16 +116,17 @@ def reliability_mask(
     """
     if settings.reliability_mode == "none":
         return np.ones(rel.shape, dtype=bool), None
+    usable = np.isfinite(rel)
     if settings.reliability_value is None:
         raise ValueError(f"A reliability value is required for mode '{settings.reliability_mode}'.")
     if settings.reliability_mode == "absolute":
         threshold = float(settings.reliability_value)
     else:
-        values = rel[within]
+        values = rel[within & usable]  # non-finite reliability never sets the threshold
         if values.size == 0:
             return np.zeros(rel.shape, dtype=bool), None
         threshold = float(np.percentile(values, settings.reliability_value))
-    return rel >= threshold, threshold
+    return usable & (rel >= threshold), threshold
 
 
 def _put_stats(row: FeatureRow, prefix: str, values: np.ndarray) -> None:
@@ -169,7 +172,7 @@ def _put_components(
         row.put(
             "axial_lateral_ratio",
             None,
-            "lateral and axial velocities have different units (complete the calibration)",
+            "lateral and axial velocities are not in one physical unit (complete the calibration)",
         )
     else:
         lateral = float(np.mean(speed_xy))
@@ -189,37 +192,60 @@ def _coherence(components: list[np.ndarray]) -> float | None:
 
 
 def _put_angles(row: FeatureRow, vx: np.ndarray, vy: np.ndarray, settings: FeatureSettings) -> None:
-    """Store the angular features; zero vectors have no angle and are excluded."""
-    moving = (vx != 0) | (vy != 0)
+    """Store the angular features of vectors with a defined direction.
+
+    A direction is defined for vectors whose XY speed exceeds ``min_direction_speed``
+    (zero vectors never have one); with fewer than ``min_direction_vectors`` such vectors
+    the angular features are undefined. Speeds are not changed by this selection.
+    """
     names = (
         "xy_angular_entropy",
         "xy_angular_dispersion",
         "xy_aligned_fraction",
         "xy_dominant_direction_deg",
     )
-    if not np.any(moving):
+    directed = np.hypot(vx, vy) > max(settings.min_direction_speed, 0.0)
+    if int(directed.sum()) < max(settings.min_direction_vectors, 1):
+        reason = (
+            f"fewer than {settings.min_direction_vectors} analysed vectors with XY speed "
+            f"> {settings.min_direction_speed:g}"
+        )
         for name in names:
-            row.put(name, None, "no analysed vector with nonzero XY velocity")
+            row.put(name, None, reason)
         return
-    theta = np.arctan2(vy[moving], vx[moving])
-    counts, _ = np.histogram(theta, bins=settings.angle_bins, range=(-np.pi, np.pi))
-    p = counts[counts > 0] / theta.size
-    row.put("xy_angular_entropy", float(-np.sum(p * np.log(p)) / np.log(settings.angle_bins)))
+    theta = np.arctan2(vy[directed], vx[directed])
     mean_cos, mean_sin = float(np.mean(np.cos(theta))), float(np.mean(np.sin(theta)))
     resultant = float(np.hypot(mean_cos, mean_sin))
+    dominant = float(np.arctan2(mean_sin, mean_cos)) if resultant >= 1e-12 else None
+    row.put("xy_angular_entropy", _angular_entropy(theta, dominant, settings.angle_bins))
     row.put("xy_angular_dispersion", 1.0 - resultant)
-    if resultant < 1e-12:
+    if dominant is None:
         row.put("xy_aligned_fraction", None, "no dominant direction (mean resultant is zero)")
         row.put("xy_dominant_direction_deg", None, "no dominant direction")
         return
-    dominant = float(np.arctan2(mean_sin, mean_cos))
     aligned = np.cos(theta - dominant) >= np.cos(np.deg2rad(settings.aligned_angle_deg))
     row.put("xy_aligned_fraction", float(np.mean(aligned)))
     row.put("xy_dominant_direction_deg", float(np.rad2deg(dominant)))
 
 
+def _angular_entropy(theta: np.ndarray, dominant: float | None, bins: int) -> float:
+    """Return the normalised entropy of directions, with one bin centred on ``dominant``.
+
+    Centring the bins on the dominant direction makes the value independent of the image
+    orientation (rotating every vector leaves it unchanged). Without a dominant direction
+    the bins start at -π.
+    """
+    width = 2 * np.pi / bins
+    origin = dominant - width / 2 if dominant is not None else -np.pi
+    counts = np.bincount(
+        np.floor(np.mod(theta - origin, 2 * np.pi) / width).astype(int) % bins, minlength=bins
+    )
+    p = counts[counts > 0] / theta.size
+    return float(-np.sum(p * np.log(p)) / np.log(bins))
+
+
 def local_coherence_map(
-    vx: np.ndarray, vy: np.ndarray, mask: np.ndarray, window: int
+    vx: np.ndarray, vy: np.ndarray, mask: np.ndarray, window: int, min_vectors: int = 1
 ) -> np.ndarray:
     """Return the local XY coherence at every voxel (NaN where undefined).
 
@@ -234,18 +260,24 @@ def local_coherence_map(
         Analysed voxels.
     window
         Neighbourhood side in pixels.
+    min_vectors
+        Minimum number of analysed nonzero vectors in the window; sparser windows (for
+        example at borders or thin foreground) are undefined, because one or two vectors
+        always look coherent.
 
     Returns
     -------
     numpy.ndarray
-        Coherence in [0, 1], NaN outside the mask or where all neighbours are zero.
+        Coherence in [0, 1], NaN outside the mask or where the window has too few vectors.
     """
     size = (1, window, window)
     sum_x = ndimage.uniform_filter(np.where(mask, vx, 0.0), size, mode="constant")
     sum_y = ndimage.uniform_filter(np.where(mask, vy, 0.0), size, mode="constant")
     sum_len = ndimage.uniform_filter(np.where(mask, np.hypot(vx, vy), 0.0), size, mode="constant")
+    moving = (mask & (np.hypot(vx, vy) > 0)).astype(np.float64)
+    support = ndimage.uniform_filter(moving, size, mode="constant") * window * window
     out = np.full(vx.shape, np.nan)
-    ok = mask & (sum_len > 0)
+    ok = mask & (sum_len > 0) & (support >= max(min_vectors, 1) - 0.5)
     out[ok] = np.hypot(sum_x[ok], sum_y[ok]) / sum_len[ok]
     return out
 
@@ -281,13 +313,28 @@ def _put_regions(
     vy: np.ndarray,
     mask: np.ndarray,
     settings: FeatureSettings,
+    speed_reason: str = "",
 ) -> None:
-    """Store the spatial-heterogeneity features (family D)."""
+    """Store the spatial-heterogeneity features (family D).
+
+    ``speed_reason`` (non-empty when the speed itself is undefined, for example 3D speed in
+    mixed units) makes every speed-dependent regional feature undefined with that reason.
+    """
     speeds, coherences, n_regions = _region_values(speed, vx, vy, mask, settings)
+    size = settings.region_size_px
     row.put("qc_n_regions", float(n_regions))
     row.put("qc_n_regions_analysed", float(len(speeds)))
+    row.put("qc_region_grid_coverage", n_regions * size * size / (mask.shape[1] * mask.shape[2]))
     few = f"fewer than 2 regions with >= {settings.min_region_voxels} analysed voxels"
+    row.put(
+        "regional_coherence_sd", float(np.std(coherences)) if len(coherences) >= 2 else None, few
+    )
+    if speed_reason:
+        for name in ("regional_speed_cv", "regional_speed_spread", "regional_moving_fraction"):
+            row.put(name, None, speed_reason)
+        return
     s = np.asarray(speeds)
+    s = s[np.isfinite(s)]
     mean = float(np.mean(s)) if s.size else 0.0
     row.put(
         "regional_speed_cv",
@@ -300,9 +347,6 @@ def _put_regions(
         "regional_speed_spread",
         spread / median if s.size >= 2 and median > 0 else None,
         few if s.size < 2 else "median regional speed is zero",
-    )
-    row.put(
-        "regional_coherence_sd", float(np.std(coherences)) if len(coherences) >= 2 else None, few
     )
     if settings.motion_threshold is None:
         row.put("regional_moving_fraction", None, "no motion threshold was set")
@@ -324,7 +368,13 @@ def _put_quality(
 ) -> None:
     """Store reliability and coverage QC (family E)."""
     within = considered & finite
-    values = rel[within]
+    rel_ok = np.isfinite(rel)
+    values = rel[within & rel_ok]
+    row.put(
+        "qc_invalid_reliability_fraction",
+        int((within & ~rel_ok).sum()) / int(within.sum()) if within.any() else None,
+        "no finite foreground voxel",
+    )
     row.put(
         "qc_reliability_median",
         float(np.median(values)) if values.size else None,
@@ -361,11 +411,12 @@ def _put_foreground_shape(
     """Store intensity and foreground-object size QC (confounders of the gain)."""
     if intensity is None:
         row.put("qc_foreground_intensity_mean", None, "source intensities were not supplied")
+    elif foreground is None:
+        row.put("qc_foreground_intensity_mean", None, "no foreground was defined")
     else:
-        region = foreground if foreground is not None else np.ones(intensity.shape, bool)
         row.put(
             "qc_foreground_intensity_mean",
-            float(np.mean(intensity[region])) if region.any() else None,
+            float(np.mean(intensity[foreground])) if foreground.any() else None,
             "empty foreground",
         )
     names = ("qc_object_mean_voxels", "qc_object_mean_z_extent", "qc_n_objects")
@@ -421,13 +472,17 @@ def frame_features(
     analysed = considered & finite & reliable
     row.put("qc_reliability_threshold", threshold, "no reliability filtering")
     v = {"x": vx[analysed], "y": vy[analysed], "z": vz[analysed]}
+    speed_reason = ""
     if settings.speed_mode == "xyz" and not scale.consistent:
+        speed_reason = "3D speed needs X, Y, Z and time calibration (one physical unit)"
         speed_all = np.full(vx.shape, np.nan)
         _put_stats(row, "speed_3d", np.array([]))
         for key in [k for k in row.undefined if k.startswith("speed_3d")]:
-            row.undefined[key] = "3D speed needs X, Y and Z in the same unit"
+            row.undefined[key] = speed_reason
     else:
-        speed_all = np.sqrt(vx**2 + vy**2 + (vz**2 if settings.speed_mode == "xyz" else 0.0))
+        speed_all = np.hypot(vx, vy)
+        if settings.speed_mode == "xyz":
+            speed_all = np.hypot(speed_all, vz)
         _put_stats(
             row, "speed_3d" if settings.speed_mode == "xyz" else "speed_xy", speed_all[analysed]
         )
@@ -438,17 +493,21 @@ def frame_features(
         _coherence([v["x"], v["y"], v["z"]]) if scale.consistent else None,
         "all analysed vectors are zero"
         if scale.consistent
-        else "lateral and axial velocities have different units",
+        else "lateral and axial velocities are not in one physical unit",
     )
-    local = local_coherence_map(vx, vy, analysed, settings.local_window_px)
+    local = local_coherence_map(
+        vx, vy, analysed, settings.local_window_px, settings.min_local_vectors
+    )
     defined = local[np.isfinite(local)]
     row.put(
         "coherence_xy_local",
         float(np.mean(defined)) if defined.size else None,
-        "no analysed vector with nonzero XY velocity",
+        f"no window with >= {settings.min_local_vectors} analysed nonzero vectors",
     )
     _put_angles(row, v["x"], v["y"], settings)
-    _put_regions(row, np.where(analysed, speed_all, np.nan), vx, vy, analysed, settings)
+    _put_regions(
+        row, np.where(analysed, speed_all, np.nan), vx, vy, analysed, settings, speed_reason
+    )
     _put_quality(row, flow["rel"], considered, finite, analysed, foreground)
     _put_foreground_shape(row, foreground, intensity)
     return row

@@ -172,6 +172,14 @@ class FeatureSettings:
         Number of bins of the XY angular entropy.
     aligned_angle_deg
         Vectors within this angle of the dominant direction count as aligned.
+    min_direction_speed
+        XY speed (feature units) above which a vector has a direction for the angular
+        features. 0 uses every nonzero vector; speeds are never changed by it.
+    min_direction_vectors
+        Fewer vectors with a direction make the angular features undefined (one vector
+        would always look perfectly aligned).
+    min_local_vectors
+        Minimum analysed nonzero vectors in a local-coherence window.
     """
 
     speed_mode: SpeedMode = "xy"
@@ -183,6 +191,9 @@ class FeatureSettings:
     motion_threshold: float | None = None
     angle_bins: int = 36
     aligned_angle_deg: float = 45.0
+    min_direction_speed: float = 0.0
+    min_direction_vectors: int = 20
+    min_local_vectors: int = 5
 
 
 def to_record(value: object) -> object:

@@ -215,3 +215,53 @@ def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
     assert frames["qc_foreground_intensity_mean"].isna().all()
     with pytest.raises(InputError, match="needs the original image"):
         external_features(folder, "exp", row, settings(), create_run(tmp_path, "ext2"))
+
+
+def _copy_run(run, target, prefix, change=None):
+    import shutil
+
+    shutil.copytree(run, target)
+    table = target / "features" / "features_per_fov.csv"
+    data = pd.read_csv(table, dtype=str, keep_default_na=False)
+    data["fov_uid"] = prefix + data["fov_uid"]
+    data.to_csv(table, index=False)
+    if change:
+        manifest = json.loads((target / "run_manifest.json").read_text())
+        manifest["settings"]["features"].update(change)
+        (target / "run_manifest.json").write_text(json.dumps(manifest))
+    return target
+
+
+def test_runs_with_different_settings_are_not_combined(experiment, tmp_path):
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    b = _copy_run(run, tmp_path / "b", "b-", {"reliability_value": 0.1})
+    with pytest.raises(InputError, match="features.reliability_value"):
+        load_runs([a, b])
+
+
+def test_repeat_labels_are_scoped_to_their_run_unless_shared(experiment, tmp_path):
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    b = _copy_run(run, tmp_path / "b", "b-")
+    scoped = load_runs([a, b])
+    assert scoped.table.groupby("condition")["repeat_id"].nunique().eq(6).all()
+    assert compare_conditions(scoped, "ctrl", "drug").iloc[0]["n_repeats_control"] == 6
+    shared = load_runs([a, b], shared_repeat_labels=True)
+    assert shared.table.groupby("condition")["repeat_id"].nunique().eq(3).all()
+
+
+def test_shallow_z_warning_is_recorded_per_fov(experiment):
+    _, _, run, _ = experiment
+    fovs = pd.read_csv(run / "fovs.csv", keep_default_na=False)
+    complete = fovs[fovs["status"] == "complete"]
+    assert complete["warnings"].str.contains("shorter than the spatial derivative kernel").all()
+
+
+def test_feature_settings_are_checked_before_any_computation(experiment, tmp_path):
+    _, metadata, _, _ = experiment
+    run = create_run(tmp_path, "early")
+    bad = settings(features=FeatureSettings(reliability_value=None))
+    with pytest.raises(InputError, match="needs a value"):
+        run_experiment(metadata, bad, run)
+    assert not any((run / "flow").iterdir())

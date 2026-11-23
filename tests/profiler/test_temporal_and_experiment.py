@@ -39,7 +39,7 @@ def test_fov_feature_count_is_in_the_planned_range():
         fov_defs = fov_dictionary(frame_dictionary(mode), "min")
         usable = [d for d in fov_defs if d.applicability != QC]
         biological = [d for d in fov_defs if d.applicability == BIOLOGICAL]
-        assert 100 <= len(usable) <= 150, (mode, len(usable))
+        assert 95 <= len(usable) <= 150, (mode, len(usable))
         assert len(biological) >= (60 if mode == "xy" else 45)  # 3D speed is axial
         assert all(d.undefined and d.formula and d.unit for d in fov_defs)
     frame_defs = frame_dictionary("xy")

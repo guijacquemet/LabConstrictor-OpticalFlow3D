@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
-from .config import Calibration, FlowParameters
+from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec
 
 Severity = Literal["error", "warning"]
 
@@ -357,6 +357,90 @@ def check_calibration(calibration: Calibration) -> list[Issue]:
                 "Z spacing is unknown: axial velocities stay in slices/frame and 3D speeds "
                 "cannot be expressed physically.",
                 "Enter the Z spacing.",
+            )
+        )
+    return issues
+
+
+def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec) -> list[Issue]:
+    """Check feature and foreground settings before anything is computed.
+
+    Parameters
+    ----------
+    features
+        Feature settings.
+    foreground
+        Foreground definition.
+
+    Returns
+    -------
+    list of Issue
+        Errors for missing or impossible values.
+    """
+    issues: list[Issue] = []
+    mode, value = features.reliability_mode, features.reliability_value
+    if mode != "none" and value is None:
+        issues.append(
+            Issue(
+                "error",
+                "reliability_value_missing",
+                f"Reliability mode '{mode}' needs a value.",
+                "Enter a threshold (absolute) or a percentile, or choose 'none'.",
+            )
+        )
+    if mode == "percentile" and value is not None and not 0 <= value <= 100:
+        issues.append(
+            Issue(
+                "error",
+                "reliability_percentile_range",
+                f"A reliability percentile must be 0-100, not {value}.",
+                "",
+            )
+        )
+    for name, minimum in (
+        ("region_size_px", 2),
+        ("local_window_px", 3),
+        ("angle_bins", 2),
+        ("min_region_voxels", 1),
+        ("min_direction_vectors", 1),
+        ("min_local_vectors", 1),
+    ):
+        if getattr(features, name) < minimum:
+            issues.append(
+                Issue("error", f"{name}_too_small", f"{name} must be at least {minimum}.", "")
+            )
+    if features.min_direction_speed < 0:
+        issues.append(
+            Issue(
+                "error",
+                "min_direction_speed_negative",
+                "min_direction_speed cannot be negative.",
+                "",
+            )
+        )
+    return issues + _check_foreground(foreground)
+
+
+def _check_foreground(foreground: ForegroundSpec) -> list[Issue]:
+    """Check the foreground definition (threshold value; warn without a foreground)."""
+    issues: list[Issue] = []
+    if foreground.mode == "threshold" and foreground.threshold is None:
+        issues.append(
+            Issue(
+                "error",
+                "foreground_threshold_missing",
+                "The intensity-threshold foreground needs a threshold value.",
+                "",
+            )
+        )
+    if foreground.mode == "none":
+        issues.append(
+            Issue(
+                "warning",
+                "no_foreground",
+                "No foreground: background and nuclear occupancy may influence the "
+                "features (exploratory whole-image measurement).",
+                "",
             )
         )
     return issues

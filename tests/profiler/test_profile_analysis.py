@@ -44,19 +44,23 @@ def table(n=8, seed=0):
 
 
 def test_metadata_qc_orientation_and_axial_are_not_inputs_by_default():
-    prepared = prepare_matrix(table(), META, DEFS, PcaSettings())
+    prepared = prepare_matrix(table(), META, DEFS, PcaSettings(selection="families"))
     assert list(prepared.matrix.columns) == ["a", "b", "c"]
     reasons = {e["feature"]: e["reason"] for e in prepared.excluded_features}
     assert reasons["const"] == "constant across fields of view"
     assert reasons["gap"].startswith("missing in 1")
     assert "qc" in reasons["qc_x"] and "orientation" in reasons["dir"]
     assert "experimental_axial" in reasons["z"]
-    with_axial = prepare_matrix(table(), META, DEFS, PcaSettings(include_axial=True))
+    with_axial = prepare_matrix(
+        table(), META, DEFS, PcaSettings(selection="families", include_axial=True)
+    )
     assert "z" in with_axial.matrix.columns
 
 
 def test_drop_fovs_policy_reports_removed_fovs():
-    prepared = prepare_matrix(table(), META, DEFS, PcaSettings(missing="drop_fovs"))
+    prepared = prepare_matrix(
+        table(), META, DEFS, PcaSettings(selection="families", missing="drop_fovs")
+    )
     assert "gap" in prepared.matrix.columns and "f0" not in prepared.matrix.index
     assert prepared.excluded_fovs == [
         {"fov_uid": "f0", "reason": "missing value in a selected feature"}
@@ -65,15 +69,20 @@ def test_drop_fovs_policy_reports_removed_fovs():
 
 def test_family_selection():
     prepared = prepare_matrix(
-        table(), META, DEFS, PcaSettings(families=("components",), include_axial=True)
+        table(),
+        META,
+        DEFS,
+        PcaSettings(selection="families", families=("components",), include_axial=True),
     )
     assert list(prepared.matrix.columns) == ["z"]
 
 
 def test_few_repeats_warning_and_pca_output():
-    few = prepare_matrix(table(4), META, DEFS, PcaSettings())  # 2 repeats per condition
+    few = prepare_matrix(
+        table(4), META, DEFS, PcaSettings(selection="families")
+    )  # 2 repeats per condition
     assert any("Fewer than 3 independent" in w for w in few.warnings)
-    prepared = prepare_matrix(table(), META, DEFS, PcaSettings())
+    prepared = prepare_matrix(table(), META, DEFS, PcaSettings(selection="families"))
     assert not any("Fewer than 3" in w for w in prepared.warnings)
     result = run_pca(prepared, 2)
     assert list(result.scores.columns) == [*META, "PC1", "PC2"]
@@ -86,7 +95,7 @@ def test_duplicate_fov_is_refused():
     t = table()
     t.loc[1, "fov_uid"] = "f0"
     with pytest.raises(ValueError, match="once"):
-        prepare_matrix(t, META, DEFS, PcaSettings())
+        prepare_matrix(t, META, DEFS, PcaSettings(selection="families"))
 
 
 def design(paired_complete=True):
@@ -119,5 +128,64 @@ def test_tests_need_three_repeats_and_complete_pairs():
 
 def test_hedges_g():
     a, b = np.array([1.0, 2.0, 3.0]), np.array([2.0, 3.0, 4.0])
-    assert hedges_g(a, b) == pytest.approx(1.0 * (1 - 3 / (4 * 6 - 9)))
-    assert np.isnan(hedges_g(a[:1], b))
+    assert hedges_g(a, b)[0] == pytest.approx(1.0 * (1 - 3 / (4 * 6 - 9)))
+    assert np.isnan(hedges_g(a[:1], b)[0])
+    g, note = hedges_g(np.ones(3), np.full(3, 2.0))
+    assert np.isnan(g) and "no variation" in note
+
+
+def test_unrelated_conditions_do_not_break_pairing():
+    t = pd.concat(
+        [design(), pd.DataFrame([{"condition": "other", "biological_repeat": "r9", "v": 5.0}])]
+    )
+    assert compare(t, "v", "ctrl", "drug", paired=True)["n_repeats_control"] == 3
+
+
+def test_missing_pairs_are_recorded():
+    t = pd.concat(
+        [
+            design(),
+            pd.DataFrame(
+                [{"condition": c, "biological_repeat": "r4", "v": np.nan} for c in ("ctrl", "drug")]
+            ),
+        ]
+    )
+    out = compare(t, "v", "ctrl", "drug", paired=True)
+    assert "ctrl/r4" in out["repeats_excluded"] and "drug/r4" in out["repeats_excluded"]
+    assert out["n_fovs_missing"] == 2
+
+
+def test_degenerate_tests_are_flagged():
+    flat = pd.DataFrame(
+        [
+            {"condition": c, "biological_repeat": f"r{i}", "v": float(v)}
+            for c, v in (("ctrl", 1), ("drug", 2))
+            for i in range(3)
+        ]
+    )
+    out = compare(flat, "v", "ctrl", "drug")
+    assert "not interpretable" in out["test"] and np.isnan(out["p_value"])
+    assert "no variation" in out["hedges_g_note"]
+
+
+def test_repeat_identity_column_is_used():
+    t = design()
+    t["repeat_id"] = t["biological_repeat"] + "-" + t.index.astype(str)  # every FOV its own
+    assert compare(t, "v", "ctrl", "drug")["n_repeats_control"] == 9
+
+
+def test_core_selection_and_signed_vz_never_enter_pca():
+    from opticalflow3d_profiler.feature_dictionary import frame_dictionary
+    from opticalflow3d_profiler.temporal_features import fov_dictionary
+
+    defs = fov_dictionary(frame_dictionary("xy"), "min")
+    names = [d.name for d in defs]
+    t = pd.DataFrame(np.random.default_rng(0).normal(size=(6, len(names))), columns=names)
+    t.insert(0, "fov_uid", [f"f{i}" for i in range(6)])
+    core = prepare_matrix(t, ["fov_uid"], defs, PcaSettings(include_axial=True))
+    assert "speed_xy_median__tmean" in core.matrix.columns and len(core.matrix.columns) <= 15
+    wide = prepare_matrix(
+        t, ["fov_uid"], defs, PcaSettings(selection="families", include_axial=True)
+    )
+    assert "vz_abs_mean__tmean" in wide.matrix.columns
+    assert not any(c.startswith("vz_mean") for c in wide.matrix.columns)

@@ -93,7 +93,7 @@ def _magnitude(mode: SpeedMode) -> list[FeatureDef]:
     ]
 
 
-NONZERO = "no analysed vector with nonzero XY velocity"
+NONZERO = "fewer than min_direction_vectors analysed vectors with XY speed > min_direction_speed"
 FEW_REGIONS = "fewer than 2 full regions with min_region_voxels analysed voxels"
 ORIENTED = " Depends on image orientation; not comparable between differently oriented images."
 
@@ -101,7 +101,7 @@ ORIENTED = " Depends on image orientation; not comparable between differently or
 COMPONENT_ROWS = [
     ("vx_mean", "Mean signed vx." + ORIENTED, "mean(vx)", "lateral", "vx", ORIENTATION),
     ("vy_mean", "Mean signed vy (y down)." + ORIENTED, "mean(vy)", "lateral", "vy", ORIENTATION),
-    ("vz_mean", "Mean signed vz.", "mean(vz)", "axial", "vz", AXIAL),
+    ("vz_mean", "Mean signed vz." + ORIENTED, "mean(vz)", "axial", "vz", ORIENTATION),
     ("vx_sd", "Standard deviation of vx.", "std(vx)", "lateral", "vx", BIOLOGICAL),
     ("vy_sd", "Standard deviation of vy.", "std(vy)", "lateral", "vy", BIOLOGICAL),
     ("vz_sd", "Standard deviation of vz.", "std(vz)", "axial", "vz", AXIAL),
@@ -149,18 +149,19 @@ COLLECTIVE_ROWS = [
     ),
     (
         "coherence_xy_local",
-        "Mean local XY coherence in a square XY window (local_window_px) of the same slice.",
+        "Mean local XY coherence in a square XY window (local_window_px) of the same slice; "
+        "windows with fewer than min_local_vectors analysed nonzero vectors are left out.",
         "mean over analysed voxels of |Σ_window v| / Σ_window |v|",
         "1",
         "vx, vy",
         BIOLOGICAL,
-        NO_VOXELS + "; all vectors zero",
+        NO_VOXELS + "; no window with min_local_vectors analysed nonzero vectors",
     ),
     (
         "xy_angular_entropy",
-        "Normalised Shannon entropy of XY directions (1 = uniform, "
-        "0 = one direction); zero vectors excluded.",
-        "-Σ p log p / log(angle_bins) over angle_bins bins",
+        "Normalised Shannon entropy of XY directions (1 = uniform, 0 = one direction). One "
+        "bin is centred on the dominant direction, so rotating the image does not change it.",
+        "-Σ p log p / log(angle_bins), angle_bins bins with one centred on θ_dom",
         "1",
         "vx, vy",
         BIOLOGICAL,
@@ -177,7 +178,7 @@ COLLECTIVE_ROWS = [
     ),
     (
         "xy_aligned_fraction",
-        "Fraction of nonzero XY vectors within aligned_angle_deg of the dominant direction.",
+        "Fraction of directed XY vectors within aligned_angle_deg of the dominant direction.",
         "mean(cos(θ-θ_dom) >= cos(aligned_angle_deg))",
         "1",
         "vx, vy",
@@ -281,8 +282,21 @@ QC_ROWS = [
     ("qc_n_regions", "Number of full regions of the grid.", "count", "region"),
     ("qc_n_regions_analysed", "Regions with enough analysed voxels.", "count", "region"),
     (
+        "qc_region_grid_coverage",
+        "Fraction of the XY image covered by full regions (partial edge regions are left out).",
+        "n_regions·region_size² / (Y·X)",
+        "1",
+    ),
+    (
+        "qc_invalid_reliability_fraction",
+        "Fraction of finite-velocity foreground voxels with non-finite reliability (never "
+        "reliable, never used to set a threshold).",
+        "n(non-finite rel)/n(finite foreground)",
+        "1",
+    ),
+    (
         "qc_foreground_intensity_mean",
-        "Mean raw intensity in the foreground (confounder).",
+        "Mean raw intensity in the foreground (confounder; undefined without a foreground).",
         "mean(I)",
         "raw intensity",
     ),
