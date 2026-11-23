@@ -46,7 +46,7 @@ Then, start using it following the instructions on the [Open and use an app](./n
 
 ## 1. Click the button to download OpticalFlow3D Profiler executable
 
-<a href="https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D/releases/download/0.1.0/OpticalFlow3D Profiler-0.1.0-Linux-x86_64.sh">
+<a href="https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D/releases/download/0.1.1/OpticalFlow3D Profiler-0.1.1-Linux-x86_64.sh">
     <img src="https://img.shields.io/badge/Download%20for%20Linux-Latest-green?logo=linux&style=for-the-badge" alt="Download for Linux" width="250">
 </a>
 
@@ -59,7 +59,7 @@ Then, start using it following the instructions on the [Open and use an app](./n
 2.- Copy and paste the following command:
 
 ```bash
-bash OpticalFlow3D Profiler-0.1.0-Linux-x86_64.sh
+bash OpticalFlow3D Profiler-0.1.1-Linux-x86_64.sh
 ```
 
 3.- Click Enter to run the command.
@@ -157,7 +157,7 @@ Follow the guidelines shown on the following GIF or the instructions bellow:
 1. Open a terminal on the folder where you downloaded the file.
 2. Copy and paste the following command:
     ```bash
-    bash OpticalFlow3D Profiler-0.1.0-MacOSX-ARCHITECTURE.sh
+    bash OpticalFlow3D Profiler-0.1.1-MacOSX-ARCHITECTURE.sh
     ```
 3. Click Enter to run the command.
 4. Follow the on-screen prompts to complete the installation.

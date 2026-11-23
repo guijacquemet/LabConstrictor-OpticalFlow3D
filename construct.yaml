@@ -1,5 +1,5 @@
 name: OpticalFlow3D_Profiler
-version: 0.1.0
+version: 0.1.1
 environment_file: environment.yaml
 installer_type: all
 license_file: LICENSE
@@ -8,7 +8,7 @@ welcome_image: app/logo/opticalflow3d_profiler_banner.png
 header_image: app/logo/opticalflow3d_profiler_header.png
 icon_image: app/logo/opticalflow3d_profiler_icon.png
 
-conclusion_text: 'Thank you! You have successfully installed OpticalFlow3D Profiler 0.1.0.'
+conclusion_text: 'Thank you! You have successfully installed OpticalFlow3D Profiler 0.1.1.'
 keep_pkgs: false
 register_python: false
 initialize_conda: false

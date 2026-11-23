@@ -46,7 +46,7 @@ REPOSITORY = os.environ.get("GITHUB_REPOSITORY")
 
 setup(
     name="opticalflow3d_profiler",
-    version="0.1.0",
+    version="0.1.1",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
     project_urls={"Source": f"https://github.com/{REPOSITORY}"} if REPOSITORY else {},
