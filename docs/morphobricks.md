@@ -9,7 +9,7 @@ The profiler follows the MorphoBricks experiment folder layout and feature colum
 | Folder layout, labels, `position_id` | morphobricks-preprocessing `docs/contract.md` §1, `discovery.py`, `image_names.py` | `7cfe8e4` (2026-11-22) | `discovery.py` |
 | Feature column names | MorphoFeature `src/morphofeature/naming.py` (decision D09) | `7537a06` (2026-11-22) | `naming.py` |
 | Condition statistics and report | MorphoCoverage (`report`, `html_report`), **imported** | `209b9be` (2026-11-18) | `coverage.py` |
-| Brightness trend and corrections | morphobricks-normalization `time_series` (contract §3.7, plan N72), **imported** | `b3a8104` (2026-11-23) | `brightness.py` (central frame of each flow window as the reference) |
+| Brightness trend and corrections | morphobricks-normalization `time_series` (contract §3.7, plan N72), **imported** | `f2aa732` (2026-11-23) | `brightness.py` (central frame of each flow window as the reference) |
 
 ## Experiment folder
 
