@@ -1,20 +1,13 @@
 """Read saved optical-flow results and decide whether they may be reused (I/O).
 
-Two kinds of folders are read:
-
-- folders written by :func:`~opticalflow3d_profiler.flow_backend.run_flow`, with a
-  ``flow_manifest.json`` whose identity and file hashes can be verified;
-- folders written by upstream ``process_flow`` (``<name>_parameters.csv`` and
-  ``<name>_vx_tNNNN.tiff`` ...). Their inputs cannot be verified, so they are marked
-  ``"external"`` everywhere they are used.
+Folders written by :func:`~opticalflow3d_profiler.flow_backend.run_flow` are read, after
+their ``flow_manifest.json`` identity and file hashes are verified.
 """
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,7 +15,7 @@ from typing import Any
 import numpy as np
 import tifffile
 
-from .flow_backend import COMPONENTS, MANIFEST_NAME, identity_key
+from .flow_backend import MANIFEST_NAME, identity_key
 from .validation import InputError
 
 
@@ -59,16 +52,13 @@ class FlowResult:
     frames
         Outputs in source-time order.
     manifest
-        The flow manifest (or a description of an external upstream result).
-    verified
-        True only for profiler results whose identity and hashes were checked.
+        The flow manifest.
     """
 
     folder: Path
     name: str
     frames: tuple[FlowFrame, ...]
     manifest: dict[str, Any]
-    verified: bool
 
 
 def read_manifest(folder: Path) -> dict[str, Any]:
@@ -144,54 +134,4 @@ def open_result(folder: Path) -> FlowResult:
         FlowFrame(o["source_frame"], {c: folder / f["name"] for c, f in o["files"].items()})
         for o in manifest["outputs"]
     )
-    return FlowResult(folder, manifest["name"], frames, manifest, verified=True)
-
-
-def open_upstream_result(folder: Path, name: str) -> FlowResult:
-    """Open a folder written by upstream ``process_flow`` (3D).
-
-    Parameters
-    ----------
-    folder
-        Folder holding ``<name>_parameters.csv`` and the ``_vx/_vy/_vz/_rel`` files.
-    name
-        The upstream ``imNameSave`` prefix.
-
-    Returns
-    -------
-    FlowResult
-        Marked ``verified=False``; the manifest records the upstream parameters and
-        that the source image identity is unknown.
-
-    Raises
-    ------
-    InputError
-        When parameters or any component of a time point are missing.
-    """
-    folder = Path(folder)
-    params_path = folder / f"{name}_parameters.csv"
-    if not params_path.is_file():
-        raise InputError(f"{params_path.name} was not found in {folder}.")
-    with params_path.open(newline="", encoding="utf-8") as handle:
-        params = next(csv.DictReader(handle))
-    pattern = re.compile(re.escape(name) + r"_(vx|vy|vz|rel)_t(\d{4})\.tiff")
-    found: dict[int, dict[str, Path]] = {}
-    for path in sorted(folder.iterdir()):
-        match = pattern.fullmatch(path.name)
-        if match:
-            found.setdefault(int(match.group(2)), {})[match.group(1)] = path
-    incomplete = sorted(t for t, parts in found.items() if set(parts) != set(COMPONENTS))
-    if not found or incomplete:
-        raise InputError(
-            f"Upstream result {name} is empty or incomplete (time points "
-            f"{incomplete}); 3D results need vx, vy, vz and rel files."
-        )
-    frames = tuple(FlowFrame(t, found[t]) for t in sorted(found))
-    manifest = {
-        "kind": "upstream.process_flow",
-        "name": name,
-        "upstream_parameters": params,
-        "source_identity": "unknown (external result, not verified)",
-        "outputs": [{"source_frame": f.source_frame} for f in frames],
-    }
-    return FlowResult(folder, name, frames, manifest, verified=False)
+    return FlowResult(folder, manifest["name"], frames, manifest)

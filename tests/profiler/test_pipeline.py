@@ -1,40 +1,34 @@
-"""End-to-end: synthetic experiment -> optical flow -> features -> PCA and comparisons."""
+"""End-to-end: synthetic experiment -> optical flow -> features -> MorphoCoverage report."""
 
 import json
 
-import numpy as np
 import pandas as pd
 import pytest
 import tifffile
-from opticalflow3d_profiler.analysis import (
-    compare_conditions,
-    export_analysis,
-    load_runs,
-)
+from opticalflow3d_profiler.analysis import load_runs
 from opticalflow3d_profiler.config import (
     Calibration,
     FeatureSettings,
     FlowParameters,
     ForegroundSpec,
 )
-from opticalflow3d_profiler.experiment import read_metadata
-from opticalflow3d_profiler.figures import condition_plot, pca_scatter, save
+from opticalflow3d_profiler.experiment import read_experiment_folder
 from opticalflow3d_profiler.pipeline import RunSettings, run_experiment
-from opticalflow3d_profiler.profile_analysis import PcaSettings, prepare_matrix, run_pca
 from opticalflow3d_profiler.results import create_run
 from opticalflow3d_profiler.synthetic import SyntheticMovie, render
 from opticalflow3d_profiler.validation import InputError
 
 CAL = Calibration(0.65, 0.65, 2.0, 0.5, source="user")
+SPEED = "Nuclei__speed_xy_median"
 
 
 def settings(**changes):
     base = dict(
         axes="TZYX",
-        channel=None,
         calibration=CAL,
         features=FeatureSettings(reliability_value=1e-3, region_size_px=24, min_region_voxels=20),
         foreground=ForegroundSpec(mode="threshold", threshold=300.0),
+        object_set="Nuclei",
     )
     base.update(changes)
     return RunSettings(**base)
@@ -54,23 +48,12 @@ def experiment(tmp_path_factory):
                 seed=seed,
                 noise_sd=5.0,
             )
-            path = root / "images" / f"{condition}_{rep}.tif"
-            path.parent.mkdir(exist_ok=True)
+            path = root / "experiment" / condition / rep / "pos1.tif"  # MorphoBricks layout
+            path.parent.mkdir(parents=True, exist_ok=True)
             tifffile.imwrite(path, render(movie), imagej=True, metadata={"axes": "TZYX"})
-            rows.append(
-                {
-                    "sample_id": f"{condition}-{rep}",
-                    "position_id": "pos1",
-                    "condition": condition,
-                    "biological_repeat": rep,
-                    "technical_repeat": "t1",
-                    "batch": "b1",
-                    "input_path": f"images/{condition}_{rep}.tif",
-                }
-            )
-    rows.append({**rows[0], "sample_id": "missing", "input_path": "images/missing.tif"})
-    pd.DataFrame(rows).to_csv(root / "metadata.csv", index=False)
-    metadata = read_metadata(root / "metadata.csv")
+            rows.append(path)
+    (root / "experiment" / "ctrl" / "r1" / "broken.tif").write_bytes(b"not a TIFF")
+    metadata = read_experiment_folder(root / "experiment")
     run = create_run(root / "results", "run1")
     manifest = run_experiment(metadata, settings(), run)
     return root, metadata, run, manifest
@@ -81,8 +64,8 @@ def test_failures_are_recorded_not_skipped(experiment):
     fovs = pd.read_csv(run / "fovs.csv")
     assert len(fovs) == 7
     failed = fovs[fovs["status"] == "failed"]
-    assert list(failed["sample_id"]) == ["missing"]
-    assert "does not exist" in failed["message"].iloc[0]
+    assert list(failed["position_id"]) == ["broken"]
+    assert set(fovs["technical_repeat"]) == {"single"}  # missing level, MorphoBricks
     assert sum(f["status"] == "complete" for f in manifest["fovs"]) == 6
 
 
@@ -91,13 +74,19 @@ def test_tables_and_provenance(experiment):
     frames = pd.read_csv(run / "features" / "features_per_frame.csv")
     per_fov = pd.read_csv(run / "features" / "features_per_fov.csv")
     assert len(per_fov) == 6 and per_fov["fov_uid"].is_unique
-    assert sorted(frames["source_frame"].unique()) == [3, 4, 5]
-    assert (frames["time_min"] == frames["source_frame"] * 0.5).all()
+    assert sorted(frames["t"].unique()) == [3, 4, 5]
+    assert (frames["time_min"] == frames["t"] * 0.5).all()
+    for column in ("condition", "biological_repeat", "technical_repeat", "position_id"):
+        assert column in frames.columns and column in per_fov.columns
+    assert SPEED in frames.columns and SPEED in per_fov.columns
+    first = frames[frames["fov_uid"] == per_fov["fov_uid"].iloc[0]]
+    assert per_fov[SPEED].iloc[0] == pytest.approx(first[SPEED].mean())  # time average
     assert frames.groupby("fov_uid").size().eq(3).all()
     dictionary = json.loads((run / "features" / "feature_dictionary.json").read_text())
     assert dictionary["units"] == {"lateral": "µm/min", "axial": "µm/min", "time": "min"}
     names = {d["name"] for d in dictionary["fov_features"]}
     assert names <= set(per_fov.columns)
+    assert dictionary["column_naming"]["object_set"] == "Nuclei"
     assert manifest["upstream"]["commit"].startswith("6b88604")
     assert manifest["settings"]["foreground"]["threshold"] == 300.0
     assert manifest["settings"]["calibration"]["pixel_size_z"] == 2.0
@@ -108,7 +97,7 @@ def test_tables_and_provenance(experiment):
 def test_faster_condition_has_higher_speed(experiment):
     _, _, run, _ = experiment
     per_fov = pd.read_csv(run / "features" / "features_per_fov.csv")
-    speed = per_fov.groupby("condition")["speed_xy_median__tmean"].mean()
+    speed = per_fov.groupby("condition")[SPEED].mean()
     assert speed["drug"] > 2 * speed["ctrl"]
 
 
@@ -132,89 +121,37 @@ def test_flow_with_other_parameters_is_not_reused(experiment):
     root, metadata, run, _ = experiment
     new = create_run(root / "results", "run3")
     manifest = run_experiment(
-        metadata.iloc[:1], settings(flow=FlowParameters(mode="xyz", w_sig=2)), new, reuse_from=run
+        metadata[metadata["position_id"] != "broken"].iloc[:1],
+        settings(flow=FlowParameters(mode="xyz", w_sig=2)),
+        new,
+        reuse_from=run,
     )
     assert manifest["fovs"][0]["status"] == "failed"
     assert "cannot be reused" in manifest["fovs"][0]["message"]
 
 
-def test_pca_and_comparison_export(experiment):
-    root, _, run, _ = experiment
+def test_morphocoverage_report_from_the_per_fov_table(experiment):
+    from opticalflow3d_profiler.coverage import Design, coverage_input, run_report
+
+    _, _, run, _ = experiment
     features = load_runs([run])
-    pca_settings = PcaSettings()
-    prepared = prepare_matrix(
-        features.table,
-        [
-            "run",
-            "fov_uid",
-            "sample_id",
-            "position_id",
-            "condition",
-            "biological_repeat",
-            "technical_repeat",
-            "batch",
-            "input_path",
-            "undefined_features",
-        ],
-        features.fov_defs,
-        pca_settings,
-    )
-    assert not any(c.startswith("qc_") for c in prepared.matrix.columns)
-    result = run_pca(prepared, 3)
-    comparison = compare_conditions(features, "ctrl", "drug")
-    out = run / "analysis"
-    export_analysis(out, features, pca_settings, result, comparison)
-    scores = pd.read_csv(out / "pca_scores.csv")
-    assert set(scores["condition"]) == {"ctrl", "drug"} and "PC1" in scores
-    settings_json = json.loads((out / "analysis_settings.json").read_text())
-    assert any("not a significance test" in w for w in settings_json["warnings"])
-    median = comparison[comparison["readout"] == "median motion magnitude"].iloc[0]
-    assert median["n_repeats_control"] == 3 and median["test"].startswith("Welch")
-    assert median["difference"] > 0
-    assert (comparison["role"] == "potential confounder").any()
-    save(pca_scatter(result.scores, result.explained_variance_ratio), out / "figures/pca.png")
-    save(
-        condition_plot(features.table, "speed_xy_median__tmean", "median"),
-        out / "figures/median.png",
-    )
-    assert (out / "figures" / "pca.png").stat().st_size > 1000
-
-
-def test_mask_foreground_must_match_image(experiment, tmp_path):
-    root, metadata, _, _ = experiment
-    mask = tmp_path / "mask.tif"
-    tifffile.imwrite(mask, np.ones((11, 48, 40), np.uint8))
-    run = create_run(tmp_path, "m")
-    fg = ForegroundSpec(mode="mask", mask_path=mask, mask_axes="ZYX")
-    manifest = run_experiment(metadata.iloc[:1], settings(foreground=fg), run)
-    assert "source image coordinates" in manifest["fovs"][0]["message"]
-
-
-def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
-    from opticalflow3d_profiler._upstream.calc_flow import process_flow
-    from opticalflow3d_profiler.external import external_features
-
-    movie = SyntheticMovie(shape=(8, 11, 40, 40), n_nuclei=4, velocity=(0, 0, 0.5))
-    tifffile.imwrite(tmp_path / "exp.tif", render(movie), imagej=True, metadata={"axes": "TZYX"})
-    process_flow(str(tmp_path), "exp", "OneTif", 3)
-    folder = tmp_path / "OpticalFlow3D" / "exp"
-    row = {
-        "sample_id": "s",
-        "position_id": "p",
-        "condition": "c",
-        "biological_repeat": "r",
-        "technical_repeat": "t",
-        "batch": "b",
-        "input_path": "exp.tif",
-    }
-    run = create_run(tmp_path, "ext")
-    manifest = external_features(folder, "exp", row, settings(foreground=ForegroundSpec()), run)
-    frames = pd.read_csv(run / "features" / "features_per_frame.csv")
-    assert sorted(frames["source_frame"]) == [3, 4]
-    assert manifest["fovs"][0]["flow_origin"].startswith("external, not verified")
-    assert "qc_foreground_intensity_mean" not in frames.columns  # intensity QC is opt-in
-    with pytest.raises(InputError, match="needs the original image"):
-        external_features(folder, "exp", row, settings(), create_run(tmp_path, "ext2"))
+    with pytest.raises(InputError, match="Confirm that each biological-repeat label"):
+        coverage_input(features, Design("ctrl", SPEED, repeats_paired=False))
+    data = coverage_input(features, Design("ctrl", SPEED, repeats_paired=True))
+    assert len(data.objects) == 6 and not any(c.startswith("qc_") for c in data.features)
+    assert (data.fovs["repeat_group"] == data.fovs["biological_repeat"]).all()
+    assert set(data.fovs["repeat_group"]) == {"r1", "r2", "r3"}  # one run: the folder labels
+    out = run / "analysis" / "report-1"
+    path, result, _ = run_report(features, Design("ctrl", SPEED, repeats_paired=True), out)
+    assert path == out / "report.html" and path.stat().st_size > 100_000
+    row = result.discovery.tests.set_index("feature").loc[SPEED]
+    assert row["observations"] == 3 and row["repeats"] == 3 and row["d"] > 0
+    assert (out / "morphocoverage_objects.csv").is_file()
+    record = json.loads((out / "design.json").read_text())
+    assert record["design"]["control"] == "ctrl" and record["observation_unit"] == "fov"
+    assert record["morphocoverage"]["version"]
+    with pytest.raises(InputError, match="never overwritten"):
+        run_report(features, Design("ctrl", SPEED, repeats_paired=True), out)
 
 
 def _copy_run(run, target, prefix, change=None):
@@ -246,7 +183,7 @@ def test_repeat_labels_are_scoped_to_their_run_unless_shared(experiment, tmp_pat
     b = _copy_run(run, tmp_path / "b", "b-")
     scoped = load_runs([a, b])
     assert scoped.table.groupby("condition")["repeat_id"].nunique().eq(6).all()
-    assert compare_conditions(scoped, "ctrl", "drug").iloc[0]["n_repeats_control"] == 6
+    assert scoped.table["repeat_id"].str.contains("/").all()
     shared = load_runs([a, b], shared_repeat_labels=True)
     assert shared.table.groupby("condition")["repeat_id"].nunique().eq(3).all()
 
@@ -258,7 +195,7 @@ def test_auto_mode_picks_per_slice_for_anisotropic_stacks(experiment):
     complete = fovs[fovs["status"] == "complete"]
     assert not complete["warnings"].str.contains("spatial derivative kernel").any()
     frames = pd.read_csv(run / "features" / "features_per_frame.csv")
-    assert frames["vz_mean"].isna().all()
+    assert frames["Nuclei__vz_mean"].isna().all()
     assert frames["undefined_features"].str.contains("no axial component").all()
     flow = next((run / "flow").iterdir())
     assert not list(flow.glob("*_vz_t*.tiff"))
@@ -267,7 +204,11 @@ def test_auto_mode_picks_per_slice_for_anisotropic_stacks(experiment):
 def test_shallow_z_warning_is_recorded_per_fov_in_3d_mode(experiment, tmp_path):
     _, metadata, _, _ = experiment
     run = create_run(tmp_path, "xyz")
-    manifest = run_experiment(metadata.iloc[:1], settings(flow=FlowParameters(mode="xyz")), run)
+    manifest = run_experiment(
+        metadata[metadata["position_id"] != "broken"].iloc[:1],
+        settings(flow=FlowParameters(mode="xyz")),
+        run,
+    )
     assert "shorter than the spatial derivative kernel" in manifest["fovs"][0]["warnings"]
 
 
@@ -278,7 +219,9 @@ def test_3d_speed_is_refused_with_per_slice_flow(experiment, tmp_path):
         features=FeatureSettings(speed_mode="xyz", reliability_value=1e-3),
     )
     with pytest.raises(InputError, match="3D speed needs 3D optical flow"):
-        run_experiment(metadata.iloc[:1], bad, create_run(tmp_path, "bad"))
+        run_experiment(
+            metadata[metadata["position_id"] != "broken"].iloc[:1], bad, create_run(tmp_path, "bad")
+        )
 
 
 def test_feature_settings_are_checked_before_any_computation(experiment, tmp_path):
@@ -288,3 +231,47 @@ def test_feature_settings_are_checked_before_any_computation(experiment, tmp_pat
     with pytest.raises(InputError, match="needs a value"):
         run_experiment(metadata, bad, run)
     assert not any((run / "flow").iterdir())
+
+
+def test_progress_is_reported_per_fov_flow_window_and_frame(experiment, tmp_path):
+    from opticalflow3d_profiler.progress import Stage, Tracker
+
+    class Recorder(Tracker):
+        def __init__(self):
+            self.stages = []
+
+        def stage(self, description, total, nested=False):
+            record = {"name": description, "total": total, "done": 0}
+            self.stages.append(record)
+
+            class Counting(Stage):
+                def update(self, note=""):
+                    record["done"] += 1
+
+            return Counting()
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    recorder = Recorder()
+    run_experiment(one, settings(), create_run(tmp_path, "progress"), tracker=recorder)
+    names = [s["name"].split()[0] for s in recorder.stages]
+    assert names == ["Fields", "Optical", "Features"]
+    assert all(s["done"] == s["total"] for s in recorder.stages)
+    assert recorder.stages[1]["total"] == 3  # 9 frames, tSig 1: 3 flow windows
+
+
+def test_unpaired_runs_are_refused_for_morphocoverage(experiment, tmp_path):
+    from opticalflow3d_profiler.coverage import Design, coverage_input
+
+    _, _, run, _ = experiment
+    ctrl = _copy_run(run, tmp_path / "c", "c-")
+    drug = _copy_run(run, tmp_path / "d", "d-")
+    for folder, keep in ((ctrl, "ctrl"), (drug, "drug")):
+        table = folder / "features" / "features_per_fov.csv"
+        data = pd.read_csv(table, dtype=str, keep_default_na=False)
+        data[data["condition"] == keep].to_csv(table, index=False)
+    scoped = load_runs([ctrl, drug])
+    with pytest.raises(InputError, match="No biological repeat holds both"):
+        coverage_input(scoped, Design("ctrl", SPEED, repeats_paired=True))
+    shared = load_runs([ctrl, drug], shared_repeat_labels=True)
+    assert len(coverage_input(shared, Design("ctrl", SPEED, repeats_paired=True)).objects) == 6

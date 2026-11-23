@@ -3,7 +3,8 @@
 Each entry says what a column means, how it is computed, its unit, at which level it is
 observed, what it needs, whether it is a biological readout, an experimental axial
 readout, an orientation descriptor or quality control, and when it is undefined. The
-profile analysis selects PCA inputs from these entries, never from column names alone.
+MorphoCoverage input selects its features from these entries (biological, and axial on
+request), never from column names alone.
 """
 
 from __future__ import annotations
@@ -187,7 +188,9 @@ COLLECTIVE_ROWS = [
     ),
     (
         "xy_dominant_direction_deg",
-        "Dominant XY direction (image coordinates, y down)." + ORIENTED + " Not a PCA input.",
+        "Dominant XY direction (image coordinates, y down)."
+        + ORIENTED
+        + " Not a MorphoCoverage feature.",
         "atan2(mean sinθ, mean cosθ)",
         "degree",
         "vx, vy",
@@ -348,7 +351,7 @@ def _components(mode: SpeedMode) -> list[FeatureDef]:
 
 
 def _quality() -> list[FeatureDef]:
-    """Return the quality-control family (never a PCA input by default)."""
+    """Return the quality-control family (metadata, never a MorphoCoverage feature)."""
     rows = [(n, d, f, u, "rel, foreground", QC) for n, d, f, u in QC_ROWS]
     return _rows("quality", rows, "no foreground voxel, or input not supplied")
 

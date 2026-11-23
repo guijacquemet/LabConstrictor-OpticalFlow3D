@@ -1,5 +1,9 @@
 # Response to the adversarial feature audit (commit 11787e9)
 
+> **Historical.** Since this response the condition statistics, the PCA and their tests
+> (Hedges' g, pairing, degenerate tests, `profile_analysis`) were removed: MorphoCoverage now
+> does the comparison (`coverage.py`). The feature-extraction rows still apply.
+
 The audit was an external review (ChatGPT) of `main` at commit `11787e9`. Each finding was
 checked against the code, and every confirmed defect has a regression test in `tests/profiler/`.
 

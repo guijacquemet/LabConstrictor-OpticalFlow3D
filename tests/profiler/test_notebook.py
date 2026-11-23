@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import matplotlib
-import pandas as pd
 import pytest
 import tifffile
 
@@ -26,8 +25,9 @@ def test_notebook_structure():
     first = "".join(nb["cells"][0]["source"])
     assert 'notebook_name = "OpticalFlow3D_Profiler"' in first
     sources = ["".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code"]
-    for step in ("load", "flow", "features", "compare", "export"):
+    for step in ("load", "settings", "process", "results", "design", "report", "demo"):
         assert any(f'app["{step}"]' in s for s in sources)
+    assert "drive.mount" in sources[2] and "pip install" in sources[1]
     # The notebook stays thin: no numerical code in the cells.
     assert not any("numpy" in s or "calc_flow" in s for s in sources[1:])
 
@@ -61,27 +61,18 @@ def test_all_steps_drive_end_to_end(tmp_path):
     for i, (condition, rep, speed) in enumerate(
         [("ctrl", "r1", 0.2), ("ctrl", "r2", 0.25), ("drug", "r1", 0.6), ("drug", "r2", 0.7)]
     ):
-        path = tmp_path / f"{condition}_{rep}.tif"
+        path = tmp_path / "experiment" / condition / rep / "p1.tif"  # MorphoBricks layout
+        path.parent.mkdir(parents=True)
         write_movie(path, speed, i)
-        rows.append(
-            {
-                "sample_id": f"s{i}",
-                "position_id": "p1",
-                "condition": condition,
-                "biological_repeat": rep,
-                "technical_repeat": "t1",
-                "batch": "b1",
-                "input_path": path.name,
-            }
-        )
-    pd.DataFrame(rows).to_csv(tmp_path / "metadata.csv", index=False)
+        rows.append(path)
     app = build()
-    for step in ("load", "flow", "features", "compare", "export"):
+    for step in ("load", "settings", "process", "results", "design", "report", "demo"):
         app[step].widget()
 
     load = app["load"]
-    load.path.value = str(tmp_path / "ctrl_r1.tif")
-    load.inspect()
+    load.experiment.value = str(tmp_path / "experiment")
+    load.results.value = str(tmp_path / "results")
+    load.load()
     assert load.axes.value == "TZYX" and load.cal["x"].value == "0.65"
     assert load.cal["t"].value == ""  # no frame interval in the header: left empty
     load.cal["t"].value = "30"
@@ -89,32 +80,34 @@ def test_all_steps_drive_end_to_end(tmp_path):
     load.confirm()
     assert app["session"].spec.calibration.frame_interval == 0.5
 
-    flow = app["flow"]
-    flow.parent.value = str(tmp_path / "results")
-    flow.metadata_csv.value = str(tmp_path / "metadata.csv")
-    flow.estimate()
-    flow.run()
-    assert len(flow.fov.options) == 4
-    flow.fov.value = flow.fov.options[0]
-    flow.show()
+    settings = app["settings"]
+    settings.threshold.value = "300"
+    settings.rel_value.value = "0.001"
+    settings.region.value = 24
+    settings.estimate()
+    settings.process_example()
+    assert list((tmp_path / "results" / "examples").glob("*/features/features_per_fov.csv"))
 
-    features = app["features"]
-    features.fg_mode.value = "threshold"
-    features.threshold.value = "300"
-    features.rel_value.value = "0.001"
-    features.region.value = 24
-    features.extract()
+    process = app["process"]
+    process.run_name.value = "run1"
+    process.qc.value = False
+    process.process()
     run = app["session"].run_dir
     assert (run / "features" / "features_per_fov.csv").exists()
 
-    compare = app["compare"]
-    compare.pca()
-    compare.control.value, compare.treatment.value = "ctrl", "drug"
-    compare.compare()
-    export = app["export"]
-    export.export()
-    out = run / "analysis" / "analysis-1"
-    assert (out / "pca_scores.csv").exists() and (out / "condition_comparison.csv").exists()
-    assert (out / "figures" / "pca_pc1_pc2.png").exists()
-    with pytest.raises(Exception, match="exists"):
-        export.export()
+    app["results"].load()
+    design = app["design"]
+    design.refresh()
+    design.control.value = "ctrl"
+    design.paired.value = True
+    design.confirm()
+    report = app["report"]
+    report.create()
+    assert (run / "analysis" / "report-1" / "report.html").exists()
+    with pytest.raises(Exception, match="never overwritten"):
+        from opticalflow3d_profiler.coverage import run_report
+
+        session = app["session"]
+        run_report(
+            session.analysis["features"], session.analysis["design"], run / "analysis" / "report-1"
+        )

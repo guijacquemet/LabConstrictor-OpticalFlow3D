@@ -1,4 +1,4 @@
-"""Checks of axes, channels, calibration and time-series length (pure).
+"""Checks of axes, the single channel, calibration and time-series length (pure).
 
 Problems the user can fix are returned as :class:`Issue` objects with a plain-language
 message and a suggested action; :func:`raise_for_errors` turns error-level issues into one
@@ -149,8 +149,11 @@ def check_axes(confirmed_axes: str, shape: tuple[int, ...]) -> list[Issue]:
     return issues
 
 
-def check_channel(axes: str, shape: tuple[int, ...], channel: int | None) -> list[Issue]:
-    """Check the channel selection.
+def check_channel(axes: str, shape: tuple[int, ...]) -> list[Issue]:
+    """Check that the video has a single channel.
+
+    The profiler analyses single-channel videos: a ``C`` axis is accepted only with length 1.
+    No channel is ever chosen from a multi-channel file.
 
     Parameters
     ----------
@@ -158,44 +161,21 @@ def check_channel(axes: str, shape: tuple[int, ...], channel: int | None) -> lis
         Confirmed axes in file order.
     shape
         Shape of the file's first series.
-    channel
-        Selected channel index or ``None``.
 
     Returns
     -------
     list of Issue
-        An error when a multi-channel file has no valid selection, or a channel is
-        selected in a file without a ``C`` axis.
+        An error for a multi-channel file.
     """
     axes = axes.upper()
-    if "C" not in axes:
-        if channel not in (None, 0):
-            return [
-                Issue(
-                    "error",
-                    "channel_without_c",
-                    "A channel was selected, but the confirmed axes have no C axis.",
-                    "Clear the channel selection.",
-                )
-            ]
-        return []
-    n_channels = shape[axes.index("C")]
-    if channel is None:
+    n_channels = shape[axes.index("C")] if "C" in axes and len(axes) == len(shape) else 1
+    if n_channels > 1:
         return [
             Issue(
                 "error",
-                "channel_required",
-                f"The image has {n_channels} channels and none was selected.",
-                "Choose the nuclear channel explicitly.",
-            )
-        ]
-    if not 0 <= channel < n_channels:
-        return [
-            Issue(
-                "error",
-                "channel_out_of_range",
-                f"Channel {channel} does not exist (the image has channels 0 to {n_channels - 1}).",
-                "Choose another.",
+                "multi_channel_not_supported",
+                f"The image has {n_channels} channels; this tool analyses single-channel videos.",
+                "Save the nuclear channel alone as a TIFF (for example with Fiji) and use that.",
             )
         ]
     return []

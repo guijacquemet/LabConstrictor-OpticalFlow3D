@@ -24,8 +24,10 @@ from .feature_dictionary import dictionary_records, frame_dictionary
 from .flow_backend import flow_identity, run_flow, upstream_identity
 from .flow_features import frame_features, velocity_scale
 from .flow_store import FlowResult, open_result, verify_result
-from .foreground import MaskInfo, check_mask, describe, mask_frame, threshold_frame
+from .foreground import describe, threshold_frame
 from .image_io import ImageHeader, dimensions, file_identity, inspect_tiff, read_frames
+from .naming import ColumnNames
+from .progress import Tracker
 from .results import environment, now, relative, write_csv, write_json
 from .temporal_features import aggregate_fov, fov_dictionary
 from .validation import (
@@ -38,7 +40,7 @@ from .validation import (
 )
 
 LOG = logging.getLogger("opticalflow3d_profiler")
-FRAME_ID_COLUMNS = ("fov_uid", "output_index", "source_frame", "time_min")
+FRAME_ID_COLUMNS = ("fov_uid", "output_index", "t", "time_min")
 
 
 @dataclass(frozen=True)
@@ -47,21 +49,28 @@ class RunSettings:
 
     Attributes
     ----------
-    axes, channel
-        Confirmed axes and channel of every input file.
+    axes
+        Confirmed axes of every input file (single-channel videos).
     calibration
         Calibration of every input (one acquisition setting per run).
     flow, features, foreground
-        Upstream parameters, feature settings and foreground definition. With a
-        ``mask_path`` column in the metadata, each field of view uses its own mask.
+        Upstream parameters, feature settings and foreground definition.
+    object_set
+        The foreground's object-set token, the first token of every feature column
+        (MorphoBricks naming, :mod:`~opticalflow3d_profiler.naming`); without foreground the
+        token is ``whole``.
     """
 
     axes: str
-    channel: int | None
     calibration: Calibration
     flow: FlowParameters = field(default_factory=FlowParameters)
     features: FeatureSettings = field(default_factory=FeatureSettings)
     foreground: ForegroundSpec = field(default_factory=ForegroundSpec)
+    object_set: str = "Nuclei"
+
+    def column_names(self) -> ColumnNames:
+        """Return the checked tokens of this run's feature columns."""
+        return ColumnNames.of(self.object_set, self.foreground.mode != "none")
 
 
 @dataclass
@@ -90,6 +99,7 @@ def obtain_flow(
     run_dir: Path,
     uid: str,
     reuse_from: Path | None,
+    tracker: Tracker | None = None,
 ) -> tuple[FlowResult, str]:
     """Return the verified optical flow of one field of view, computing it if needed.
 
@@ -105,6 +115,8 @@ def obtain_flow(
         Field-of-view identifier.
     reuse_from
         Earlier run folder whose ``flow/<uid>`` may be reused.
+    tracker
+        Optional progress display of the optical-flow windows.
 
     Returns
     -------
@@ -126,7 +138,7 @@ def obtain_flow(
             )
         return open_result(folder), f"reused: {folder.as_posix()}"
     out = run_dir / "flow" / uid
-    run_flow(spec, header, settings.flow, out, uid, progress=LOG.info)
+    run_flow(spec, header, settings.flow, out, uid, progress=LOG.info, tracker=tracker)
     return open_result(out), "computed"
 
 
@@ -135,6 +147,7 @@ def frame_rows(
     settings: RunSettings,
     foreground_of: Callable,
     intensity_of: Callable | None,
+    tracker: Tracker | None = None,
 ) -> list[dict[str, object]]:
     """Compute the feature rows of every output of a flow result, one frame at a time.
 
@@ -148,6 +161,8 @@ def frame_rows(
         ``source_frame -> boolean ZYX or None``.
     intensity_of
         ``source_frame -> ZYX intensities`` or ``None``.
+    tracker
+        Optional progress display of the frames.
 
     Returns
     -------
@@ -156,6 +171,7 @@ def frame_rows(
     """
     rows = []
     dt = settings.calibration.frame_interval
+    stage = (tracker or Tracker()).stage(f"Features {result.name}", len(result.frames), True)
     for index, frame in enumerate(result.frames):
         t = frame.source_frame
         intensity = intensity_of(t) if intensity_of else None
@@ -170,12 +186,12 @@ def frame_rows(
         features.put(
             "qc_brightness_change_per_frame",
             recorded.get("brightness_change_per_frame"),
-            "not recorded (optical flow from an external or older result)",
+            "not recorded (optical flow from an older result)",
         )
         row: dict[str, object] = {
             "fov_uid": result.name,
             "output_index": index,
-            "source_frame": t,
+            "t": t,
             "time_min": t * dt if dt else None,
         }
         row.update(features.values)
@@ -183,6 +199,8 @@ def frame_rows(
             f"{k}: {v}" for k, v in sorted(features.undefined.items())
         )
         rows.append(row)
+        stage.update(f"time point {t}")
+    stage.close()
     return rows
 
 
@@ -208,15 +226,12 @@ def brightness_warning(result: FlowResult, equalised: bool) -> str:
 
 def foreground_reader(spec: ForegroundSpec, dims: dict[str, int]) -> tuple[Callable, dict]:
     """Return the per-frame foreground function and its provenance description."""
-    info: MaskInfo | None = None
-    if spec.mode == "mask":
-        info = check_mask(spec, dims)
-        return (lambda t, _i: mask_frame(info, t, dims)), describe(spec, info)
+    del dims  # the threshold works on each frame's intensities
     if spec.mode == "threshold":
         if spec.threshold is None:
             raise InputError("A foreground threshold value is required.")
-        return (lambda _t, i: threshold_frame(i, spec.threshold)), describe(spec, None)
-    return (lambda _t, _i: None), describe(spec, None)
+        return (lambda _t, i: threshold_frame(i, spec.threshold)), describe(spec)
+    return (lambda _t, _i: None), describe(spec)
 
 
 def process_fov(
@@ -225,6 +240,7 @@ def process_fov(
     run_dir: Path,
     reuse_from: Path | None = None,
     flow_only: bool = False,
+    tracker: Tracker | None = None,
 ) -> FovOutcome:
     """Run optical flow and feature extraction for one metadata row.
 
@@ -240,6 +256,8 @@ def process_fov(
         Earlier run folder for verified flow reuse.
     flow_only
         Stop after the optical flow (status ``flow complete``).
+    tracker
+        Optional progress display (nested bars of this field of view).
 
     Returns
     -------
@@ -256,9 +274,7 @@ def process_fov(
         "message": "",
     }
     try:
-        spec = ImageSpec(
-            Path(row["input_path"]), settings.axes, settings.channel, settings.calibration
-        )
+        spec = ImageSpec(Path(row["image_path"]), settings.axes, settings.calibration)
         header = inspect_tiff(spec.path)
         warnings = calibration_warnings(header, settings.calibration)
         dims = dimensions(spec, header)
@@ -267,7 +283,7 @@ def process_fov(
             for i in check_time_and_depth(dims["T"], dims["Z"], settings.flow)
             if i.severity == "warning"
         ]
-        result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from)
+        result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from, tracker)
         warnings += [
             w
             for w in [brightness_warning(result, settings.flow.brightness_equalisation != "none")]
@@ -282,11 +298,9 @@ def process_fov(
             )
             return FovOutcome(status)
         fg_spec = settings.foreground
-        if row.get("mask_path"):
-            fg_spec = replace(fg_spec, mask_path=Path(row["mask_path"]))
         foreground_of, fg_record = foreground_reader(fg_spec, dims)
         rows = frame_rows(
-            result, settings, foreground_of, lambda t: read_frames(spec, header, [t])[0]
+            result, settings, foreground_of, lambda t: read_frames(spec, header, [t])[0], tracker
         )
         if fg_spec.mode == "none":
             warnings.append(fg_record["warning"])
@@ -309,13 +323,8 @@ def fov_table(frame_table: pd.DataFrame, settings: RunSettings) -> pd.DataFrame:
     defs = frame_dictionary(settings.features.speed_mode, settings.features.intensity_features)
     rows = []
     for uid, group in frame_table.groupby("fov_uid", sort=True):
-        group = group.sort_values("source_frame")
-        values, undefined = aggregate_fov(
-            group.to_dict("records"),
-            group["source_frame"].tolist(),
-            defs,
-            settings.calibration.frame_interval,
-        )
+        group = group.sort_values("t")
+        values, undefined = aggregate_fov(group.to_dict("records"), defs)
         rows.append(
             {
                 "fov_uid": uid,
@@ -326,10 +335,30 @@ def fov_table(frame_table: pd.DataFrame, settings: RunSettings) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def rename_features(table: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
+    """Rename feature columns and the names in ``undefined_features`` notes."""
+    out = table.rename(columns=mapping)
+    if "undefined_features" in out.columns:
+        out["undefined_features"] = [
+            "; ".join(
+                f"{mapping.get(k, k)}:{v}"
+                for k, _, v in (p.partition(":") for p in str(n).split("; "))
+            )
+            if isinstance(n, str) and n
+            else n
+            for n in out["undefined_features"]
+        ]
+    return out
+
+
 def write_feature_tables(
     run_dir: Path, metadata: pd.DataFrame, frame_table: pd.DataFrame, settings: RunSettings
 ) -> pd.DataFrame:
-    """Write the frame and FOV feature tables and the feature dictionary.
+    """Write the full per-frame table, the per-FOV time averages and the feature dictionary.
+
+    Feature columns are renamed to the MorphoBricks scheme ``{object_set}__{feature}``
+    (single-channel videos); ``qc_*`` columns keep their names (metadata).
+    Undefined-feature notes name the columns too.
 
     Returns
     -------
@@ -338,10 +367,13 @@ def write_feature_tables(
     """
     defs = frame_dictionary(settings.features.speed_mode, settings.features.intensity_features)
     time_unit = "min" if settings.calibration.frame_interval else "frame"
-    per_fov = fov_table(frame_table, settings)
+    names = settings.column_names()
+    mapping = names.mapping(d.name for d in defs)
+    per_fov = rename_features(fov_table(frame_table, settings), mapping)
     meta = metadata[[c for c in METADATA_COLUMNS if c in metadata.columns]]
     per_fov = meta.merge(per_fov, on="fov_uid", how="inner")
-    per_frame = meta.merge(frame_table, on="fov_uid", how="inner")
+    per_frame = meta.merge(rename_features(frame_table, mapping), on="fov_uid", how="inner")
+    defs = [replace(d, name=mapping[d.name]) for d in defs]
     write_csv(run_dir / "features" / "features_per_frame.csv", per_frame)
     write_csv(run_dir / "features" / "features_per_fov.csv", per_fov)
     scale = velocity_scale(settings.calibration)
@@ -349,10 +381,14 @@ def write_feature_tables(
         run_dir / "features" / "feature_dictionary.json",
         {
             "units": {"lateral": scale.lateral_unit, "axial": scale.axial_unit, "time": time_unit},
+            "column_naming": {
+                "scheme": "MorphoBricks {object_set}__{feature} (single channel); qc_* unprefixed",
+                "object_set": names.object_set,
+            },
             "metadata_columns": list(meta.columns),
             "frame_identifier_columns": list(FRAME_ID_COLUMNS),
             "frame_features": dictionary_records(defs),
-            "fov_features": dictionary_records(fov_dictionary(defs, time_unit)),
+            "fov_features": dictionary_records(fov_dictionary(defs)),
         },
     )
     return per_fov
@@ -365,6 +401,7 @@ def run_experiment(
     reuse_from: Path | None = None,
     progress: Callable[[str], None] | None = None,
     flow_only: bool = False,
+    tracker: Tracker | None = None,
 ) -> dict[str, object]:
     """Process every field of view of a validated metadata table into a run folder.
 
@@ -386,6 +423,9 @@ def run_experiment(
         Optional callback for one line per field of view.
     flow_only
         Calculate and verify the optical flow only.
+    tracker
+        Optional progress display (:mod:`~opticalflow3d_profiler.progress`): one bar over
+        the fields of view, nested bars over each one's flow windows and feature frames.
 
     Returns
     -------
@@ -405,6 +445,7 @@ def run_experiment(
     settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
         raise_for_errors(check_feature_settings(settings.features, settings.foreground))
+        settings.column_names()
         if settings.flow.mode == "xy_per_slice" and settings.features.speed_mode == "xyz":
             raise InputError(
                 "3D speed needs 3D optical flow; with per-slice 2D flow choose XY speed."
@@ -414,12 +455,16 @@ def run_experiment(
     LOG.setLevel(logging.INFO)
     started = now()
     outcomes = []
+    tracker = tracker or Tracker()
+    stage = tracker.stage("Fields of view", len(metadata))
     try:
         for row in metadata.to_dict("records"):
             (progress or LOG.info)(f"Processing {row['fov_uid']}...")
-            outcomes.append(process_fov(row, settings, run_dir, reuse_from, flow_only))
+            outcomes.append(process_fov(row, settings, run_dir, reuse_from, flow_only, tracker))
             (progress or LOG.info)(f"{row['fov_uid']}: {outcomes[-1].status['status']}")
+            stage.update(f"{row['position_id']}: {outcomes[-1].status['status']}")
     finally:
+        stage.close()
         LOG.removeHandler(handler)
         handler.close()
     rows = [r for o in outcomes for r in o.rows]

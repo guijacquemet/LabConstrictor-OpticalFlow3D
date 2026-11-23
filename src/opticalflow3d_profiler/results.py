@@ -6,7 +6,7 @@ Layout of one run::
     <run>/flow/<fov_uid>/    upstream-format velocity files + flow_manifest.json
     <run>/features/          features_per_frame.csv  features_per_fov.csv
                              feature_dictionary.json
-    <run>/analysis/          PCA, comparisons and figures (written by the analysis step)
+    <run>/analysis/          MorphoCoverage reports (written by the analysis step)
     <run>/logs/run.log
 
 A run folder is never reused for a different run: :func:`create_run` refuses an existing,
@@ -33,10 +33,13 @@ DEPENDENCIES = (
     "scipy",
     "tifffile",
     "pandas",
-    "scikit-learn",
     "matplotlib",
     "ipywidgets",
     "natsort",
+    "tqdm",
+    "morphocoverage",
+    "umap-learn",
+    "scikit-learn",
 )
 
 

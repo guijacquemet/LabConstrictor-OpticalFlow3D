@@ -2,7 +2,7 @@
 
 For visual confirmation of each intermediate step, ``<run>/qc/<fov_uid>/`` receives:
 
-- ``input_montage_z<z>.png``: the analysed channel at one Z slice for every time point;
+- ``input_montage_z<z>.png``: the video at one Z slice for every time point;
 - ``foreground_t<t>.png``: the foreground outline at each optical-flow time point (when
   a foreground is defined);
 - ``flow_t<t>.png``: image with flow vectors (unreliable vectors grey), XY speed and
@@ -15,7 +15,6 @@ figures only display saved results; they compute no new numbers.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +25,9 @@ from .config import ImageSpec
 from .flow_features import reliability_mask
 from .flow_store import open_result
 from .image_io import dimensions, inspect_tiff, read_frames
+from .naming import find_column
 from .pipeline import RunSettings, foreground_reader
+from .progress import Tracker
 from .validation import InputError
 
 QC_DPI = 120
@@ -40,9 +41,13 @@ def flow_folder(run_dir: Path, status: dict[str, object]) -> Path:
     return Path(run_dir) / "flow" / str(status["fov_uid"])
 
 
-def _speed_column(frames: pd.DataFrame) -> str:
-    """Return the speed-median column of the run's speed mode."""
-    return "speed_3d_median" if "speed_3d_median" in frames.columns else "speed_xy_median"
+def _plotted(frames: pd.DataFrame) -> list[str]:
+    """Return the speed-median, coherence and reliable-fraction columns of a table."""
+    speed = find_column(frames.columns, "speed_3d_median") or find_column(
+        frames.columns, "speed_xy_median"
+    )
+    coherence = find_column(frames.columns, "coherence_xy_global")
+    return [c for c in (speed, coherence, "qc_reliable_fraction") if c in frames.columns]
 
 
 def export_fov(
@@ -57,7 +62,7 @@ def export_fov(
     status
         The field of view's row of ``fovs.csv`` (metadata and status columns).
     settings
-        Run settings (axes, channel, foreground and reliability).
+        Run settings (axes, foreground and reliability).
     z
         Z slice to show; default is the middle slice.
 
@@ -68,7 +73,7 @@ def export_fov(
     """
     uid = str(status["fov_uid"])
     out = Path(run_dir) / "qc" / uid
-    spec = ImageSpec(Path(str(status["input_path"])), settings.axes, settings.channel)
+    spec = ImageSpec(Path(str(status["image_path"])), settings.axes)
     header = inspect_tiff(spec.path)
     dims = dimensions(spec, header)
     z = dims["Z"] // 2 if z is None else z
@@ -81,10 +86,7 @@ def export_fov(
         written[-1],
         dpi=QC_DPI,
     )
-    fg_spec = settings.foreground
-    if str(status.get("mask_path", "") or "") not in ("", "nan"):
-        fg_spec = replace(fg_spec, mask_path=Path(str(status["mask_path"])))
-    foreground_of, _ = foreground_reader(fg_spec, dims)
+    foreground_of, _ = foreground_reader(settings.foreground, dims)
     for frame in open_result(flow_folder(run_dir, status)).frames:
         t = frame.source_frame
         intensity = read_frames(spec, header, [t])[0]
@@ -113,7 +115,9 @@ def export_fov(
     return written
 
 
-def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None) -> list[Path]:
+def export_qc_figures(
+    run_dir: Path, settings: RunSettings, z: int | None = None, tracker: Tracker | None = None
+) -> list[Path]:
     """Save QC figures for every completed field of view of a run.
 
     Parameters
@@ -124,6 +128,8 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
         The run's settings.
     z
         Z slice to show; default is the middle slice.
+    tracker
+        Optional progress display (one step per field of view).
 
     Returns
     -------
@@ -143,27 +149,28 @@ def export_qc_figures(run_dir: Path, settings: RunSettings, z: int | None = None
     table = run_dir / "features" / "features_per_frame.csv"
     frames = pd.read_csv(table) if table.exists() else None
     written: list[Path] = []
+    stage = (tracker or Tracker()).stage("QC figures", len(done))
     for status in done.to_dict("records"):
         written += export_fov(run_dir, status, settings, z)
         if frames is not None:
-            own = frames[frames["fov_uid"] == status["fov_uid"]].sort_values("source_frame")
+            own = frames[frames["fov_uid"] == status["fov_uid"]].sort_values("t")
             path = run_dir / "qc" / status["fov_uid"] / "features_over_time.png"
             figures.save(
                 figures.feature_timeseries(
                     own,
-                    [_speed_column(own), "coherence_xy_global", "qc_reliable_fraction"],
-                    "source_frame",
+                    _plotted(own),
+                    "t",
                 ),
                 path,
                 dpi=QC_DPI,
             )
             written.append(path)
+        stage.update(str(status["position_id"]))
+    stage.close()
     if frames is not None:
         path = run_dir / "qc" / "feature_histograms.png"
         figures.save(
-            figures.feature_histograms(
-                frames, [_speed_column(frames), "coherence_xy_global", "qc_reliable_fraction"]
-            ),
+            figures.feature_histograms(frames, _plotted(frames)),
             path,
             dpi=QC_DPI,
         )

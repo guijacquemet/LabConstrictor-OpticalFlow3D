@@ -1,7 +1,7 @@
 """Read-only TIFF and OME-TIFF access with tifffile (I/O).
 
 :func:`inspect_tiff` reads the header only. :func:`read_frames` reads just the planes of
-the requested time points and channel, page by page, so the whole movie is never held in
+the requested time points, page by page, so the whole movie is never held in
 memory. Calibration found in a header is returned as a *suggestion* for the user to
 confirm; it is never applied silently, and missing values stay ``None``.
 """
@@ -113,7 +113,7 @@ def inspect_tiff(path: Path) -> ImageHeader:
         raise InputError(f"{path.name} could not be read as a TIFF file: {error}") from error
     extra: list[str] = []
     if header.n_series > 1:
-        extra.append(f"The file holds {header.n_series} image series; only the first is used.")
+        extra.append(f"The file holds {header.n_series} image series; it will be refused.")
     if header.axes_ambiguous:
         extra.append(
             f"The header does not name all axes ({header.header_axes}); confirm the "
@@ -209,20 +209,23 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
     Parameters
     ----------
     spec
-        Confirmed axes and channel.
+        Confirmed axes.
     header
         Header of the same file.
 
     Raises
     ------
     InputError
-        When the axes or channel selection are invalid, or Y and X are not the last two
-        axes (pages must be XY planes).
+        When the axes are invalid, the file has several channels or series, or Y and X are
+        not the last two axes (pages must be XY planes).
     """
-    issues = check_axes(spec.axes, header.shape) + check_channel(
-        spec.axes, header.shape, spec.channel
-    )
+    issues = check_axes(spec.axes, header.shape) + check_channel(spec.axes, header.shape)
     raise_for_errors(issues)
+    if header.n_series > 1:
+        raise InputError(
+            f"multiple_series: {header.path.name} holds {header.n_series} image series "
+            "(several positions or scenes); save one field of view per file (MorphoBricks)."
+        )
     if "S" in header.header_axes:
         raise InputError(
             "The file stores samples per pixel (RGB or similar planar samples); "
@@ -254,7 +257,7 @@ def dimensions(spec: ImageSpec, header: ImageHeader) -> dict[str, int]:
 
 
 def read_frames(spec: ImageSpec, header: ImageHeader, frames: list[int]) -> np.ndarray:
-    """Read selected time points of the selected channel as a TZYX array.
+    """Read selected time points of the (single-channel) video as a TZYX array.
 
     Parameters
     ----------
@@ -277,7 +280,7 @@ def read_frames(spec: ImageSpec, header: ImageHeader, frames: list[int]) -> np.n
     planes = []
     for t in frames:
         for z in range(dims["Z"]):
-            position = {"T": t, "Z": z, "C": spec.channel or 0}
+            position = {"T": t, "Z": z, "C": 0}
             planes.append(np.ravel_multi_index([position[a] for a in outer_axes], outer_shape))
     with tifffile.TiffFile(header.path) as tif:
         data = tif.asarray(key=[int(p) for p in planes], series=0)

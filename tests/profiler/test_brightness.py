@@ -83,20 +83,17 @@ def test_brightness_qc_column_and_warning(tmp_path):
         pd.DataFrame(
             [
                 {
-                    "sample_id": "s",
                     "position_id": "p",
                     "condition": "c",
                     "biological_repeat": "r",
                     "technical_repeat": "t",
-                    "batch": "b",
-                    "input_path": str(path),
+                    "image_path": str(path),
                 }
             ]
         )
     )
     settings = RunSettings(
         "TZYX",
-        None,
         Calibration(),
         FlowParameters(mode="xyz"),
         features=FeatureSettings(reliability_value=1e-3, region_size_px=16, min_region_voxels=10),
@@ -108,7 +105,8 @@ def test_brightness_qc_column_and_warning(tmp_path):
     frames = pd.read_csv(run / "features" / "features_per_frame.csv")
     assert frames["qc_brightness_change_per_frame"].iloc[0] == pytest.approx(0.05, rel=0.15)
     per_fov = pd.read_csv(run / "features" / "features_per_fov.csv")
-    assert "qc_brightness_change_per_frame__tmax" in per_fov.columns
+    assert "qc_brightness_change_per_frame" in per_fov.columns
+    assert "Nuclei__speed_xy_median" in per_fov.columns
     flow_manifest = json.loads(
         next((run / "flow").iterdir()).joinpath("flow_manifest.json").read_text()
     )

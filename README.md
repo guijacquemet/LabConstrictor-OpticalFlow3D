@@ -3,7 +3,8 @@
 **Status: experimental.** A LabConstrictor desktop app that quantifies nuclear motion in 3D
 fluorescence time-lapses. It runs the original [OpticalFlow3D](https://github.com/aicjanelia/OpticalFlow3D)
 algorithm (HHMI Janelia, BSD-3-Clause, unchanged copy pinned at commit `6b88604`), turns the
-velocity fields into motion profiles per field of view, and compares experimental conditions.
+velocity fields into motion profiles per field of view, and compares experimental conditions
+with [MorphoCoverage](https://github.com/CellMigrationLab/MorphoCoverage) (a pinned dependency).
 
 ## Install
 
@@ -17,22 +18,24 @@ The installer downloads the Python packages during installation. After that, the
 
 ## What it does
 
-1. **Load images:** TIFF / OME-TIFF, one field of view per file. You confirm the axes, the nuclear
-   channel and the calibration. Nothing is guessed, and missing calibration stays missing.
-2. **Optical flow:** runs upstream `calc_flow3D` one time window at a time and saves `vx`, `vy`, `vz`
-   and `rel` in the upstream file layout, with a manifest of SHA-256 hashes. The app estimates memory,
-   disk and time before running.
-3. **Motion features:** computed per optical-flow time point inside the foreground (mask or a fixed
-   intensity threshold) and the reliability filter. The families are magnitude, velocity components,
-   collective motion, spatial heterogeneity and QC. The time points are then aggregated per field of
-   view (temporal mean, SD and slope; circular statistics for direction).
-4. **Compare experiments:** PCA of selected feature families (QC never included), and comparison
-   of conditions at the biological-repeat level with effect sizes. Potential confounders are
-   compared alongside the readouts.
-5. **Export:** feature tables, feature dictionary, PCA, comparison, figures and full provenance.
-
-Previously calculated upstream `process_flow` results can also be analysed. They are marked as
-unverified.
+1. **Load images:** single-channel TIFF / OME-TIFF videos, one field of view per file, in a
+   MorphoBricks experiment folder. You confirm the axes and the calibration. Nothing is guessed,
+   and missing calibration stays missing.
+2. **Optical flow:** runs upstream `calc_flow3D`, or `calc_flow2D` slice per slice for anisotropic
+   stacks, one time window at a time, and saves `vx`, `vy`, `vz` and `rel` in the upstream file
+   layout with a manifest of SHA-256 hashes. The app estimates memory, disk and time before running,
+   processes one example first, and shows progress bars with the time left.
+3. **Motion features:** computed per optical-flow time point inside the foreground (a fixed
+   intensity threshold, or the whole image) and the reliability filter. The families are magnitude,
+   velocity components, collective motion, spatial heterogeneity and QC. Every time point is kept in
+   `features_per_frame.csv`, and `features_per_fov.csv` holds the time average per field of view
+   (circular mean for direction).
+4. **Compare conditions:** you choose the control and the readout and confirm that repeat labels
+   pair across conditions. [MorphoCoverage](https://github.com/CellMigrationLab/MorphoCoverage)
+   then compares every condition with the control, with the field of view as the observation. It
+   reports Cohen's d, the exploratory FOV-level randomization screen and the paired test on repeat
+   means, along with the PCA/UMAP and per-feature figures. Its full HTML report opens from a link
+   in a new tab. `qc_*` columns are never given to it as features.
 
 ## Check an installation with synthetic data
 
@@ -42,18 +45,18 @@ writes a synthetic experiment with a known answer:
 - `drug` nuclei move twice as fast, all in the same direction.
 
 It runs every step and checks the results against the ground truth. The checks cover the speed
-ratio, coherence, direction, axial drift and noise floor, PCA separation, recording of a failing
-file, and verified reuse of the optical flow.
+ratio, coherence, direction, axial drift and noise floor, the MorphoCoverage verdict on coherence,
+recording of a failing file, and verified reuse of the optical flow.
 
 It keeps every intermediate file:
-- images and ground-truth masks;
+- the experiment folder of synthetic images;
 - optical-flow TIFFs and their manifests;
 - feature tables;
 - QC figures (`<run>/qc/`);
-- the PCA and comparison exports.
+- the MorphoCoverage report (`<run>/analysis/demo/report.html`).
 
-`demo_report.md` lists each expectation as PASS or FAIL. In step 3, **Save QC figures** writes
-the same input, foreground and flow figures for your own data.
+`demo_report.md` lists each expectation as PASS or FAIL. Section 3 saves the same input, foreground
+and flow figures for your own data.
 
 ## Interpretation safeguards
 
@@ -63,9 +66,12 @@ the same input, foreground and flow figures for your own data.
   speed (up to ×1.7)**. The bias depends on nuclear size ([docs/validation.md](docs/validation.md)),
   so speeds are relative. Check the QC confounders: nuclear object size and Z extent, intensity,
   occupancy and reliability.
-- Z-dependent features are **experimental** and are excluded from the PCA unless you choose them.
-- Fields of view from one biological repeat are not independent. A PCA separation is not evidence
-  that a treatment changes migration.
+- Z-dependent features are **experimental** and are given to MorphoCoverage only when you choose
+  them (an axial readout is always included).
+- Fields of view from one biological repeat are not independent. A separation in the PCA or UMAP is
+  not evidence that a treatment changes migration. MorphoCoverage's FOV-level randomization screen
+  is exploratory; only its paired test on repeat means (3 or more biological repeats) says whether
+  an effect repeats.
 
 ## Resources
 
@@ -80,13 +86,17 @@ processing (measured on a 4-vCPU machine), and 9.4 GB of float64 output per fiel
 <run>/experiments.csv     validated metadata with fov_uid
 <run>/fovs.csv            status of every field of view (failures included)
 <run>/flow/<fov_uid>/     <fov_uid>_{vx,vy,vz,rel}_tNNNN.tiff + flow_manifest.json
-<run>/features/           features_per_frame.csv, features_per_fov.csv, feature_dictionary.json
-<run>/analysis/<name>/    pca_*.csv, condition_comparison.csv, analysis_settings.json, figures/
+<run>/features/           features_per_frame.csv (every time point t), features_per_fov.csv
+                          (time averages), feature_dictionary.json
+<run>/analysis/<name>/    MorphoCoverage report.html with its figures and data, design.json,
+                          morphocoverage_objects.csv, morphocoverage_fovs.csv
 <run>/logs/run.log
 ```
 
-Metadata CSV columns: `sample_id, position_id, condition, biological_repeat, technical_repeat,
-batch, input_path` (optional `mask_path`). Relative paths are resolved from the CSV's folder.
+Input: a MorphoBricks experiment folder, `<root>/<condition>/<biological repeat>/<technical
+repeat>/<image>.tif`. Every level is optional, and a missing level is recorded as `single`.
+Videos have a single channel. Feature columns are named `<foreground name or whole>__<feature>`.
+See [docs/morphobricks.md](docs/morphobricks.md).
 
 ## Development
 
@@ -106,4 +116,5 @@ paper:
 > a tool for measuring amorphous motion in three-dimensional fluorescence microscopy images.
 > *J. Cell Sci.* 139(21), jcs264851. https://doi.org/10.1242/jcs.264851
 
-and [LabConstrictor](https://doi.org/10.48550/arXiv.2603.10704).
+and [LabConstrictor](https://doi.org/10.48550/arXiv.2603.10704). The condition statistics and the
+report are MorphoCoverage's (CellMigrationLab, MIT licence).

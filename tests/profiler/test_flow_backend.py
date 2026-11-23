@@ -13,7 +13,6 @@ from opticalflow3d_profiler.flow_backend import (
 )
 from opticalflow3d_profiler.flow_store import (
     open_result,
-    open_upstream_result,
     verify_result,
 )
 from opticalflow3d_profiler.image_io import file_identity, inspect_tiff
@@ -23,7 +22,7 @@ from opticalflow3d_profiler.validation import InputError
 @pytest.fixture
 def flow_run(tmp_path, imagej_file):
     path, stack = imagej_file
-    spec = ImageSpec(path, "TZCYX", channel=1)
+    spec = ImageSpec(path, "TZYX")
     header = inspect_tiff(path)
     out = tmp_path / "flow" / "fov1"
     manifest = run_flow(spec, header, FlowParameters(mode="xyz"), out, "fov1")
@@ -32,7 +31,7 @@ def flow_run(tmp_path, imagej_file):
 
 def test_parity_with_direct_upstream_call(flow_run):
     _, _, stack, out, manifest = flow_run
-    movie = stack[:, :, 1]
+    movie = stack
     assert [o["source_frame"] for o in manifest["outputs"]] == [3, 4, 5]  # 9 frames
     for t in (3, 4, 5):
         vx, vy, vz, rel = calc_flow3D(movie[t - 3 : t + 4], 3, 1, 4)
@@ -48,7 +47,7 @@ def test_manifest_records_provenance(flow_run):
     assert on_disk == manifest
     identity = manifest["identity"]
     assert identity["upstream"]["commit"].startswith("6b88604")
-    assert identity["axes"] == "TZCYX" and identity["channel"] == 1
+    assert identity["axes"] == "TZYX" and "channel" not in identity
     assert identity["source"]["sha256"] == file_identity(spec.path)["sha256"]
     assert identity["frame_map"] == [3, 4, 5]
     assert manifest["velocity_units"]["vz"] == "slice/frame"
@@ -66,10 +65,10 @@ def test_reuse_requires_identical_identity_and_files(flow_run):
     assert verify_result(out, flow_identity(spec, header, FlowParameters(mode="xyz"), source)) == []
     other = flow_identity(spec, header, FlowParameters(mode="xyz", w_sig=2), source)
     assert any("parameters" in p for p in verify_result(out, other))
-    other_channel = flow_identity(
-        ImageSpec(spec.path, "TZCYX", channel=0), header, FlowParameters(mode="xyz"), source
+    other_axes = flow_identity(
+        ImageSpec(spec.path, "ZTYX"), header, FlowParameters(mode="xyz"), source
     )
-    assert any("channel" in p for p in verify_result(out, other_channel))
+    assert any("axes" in p for p in verify_result(out, other_axes))
     target = out / manifest["outputs"][0]["files"]["vx"]["name"]
     target.write_bytes(target.read_bytes()[:-8] + b"\0" * 8)
     assert any("changed" in p for p in verify_result(out))
@@ -80,16 +79,14 @@ def test_reuse_requires_identical_identity_and_files(flow_run):
 def test_open_result_lists_frames(flow_run):
     *_, out, _ = flow_run
     result = open_result(out)
-    assert result.verified and [f.source_frame for f in result.frames] == [3, 4, 5]
+    assert [f.source_frame for f in result.frames] == [3, 4, 5]
     assert set(result.frames[0].load()) == {"vx", "vy", "vz", "rel"}
 
 
 def test_float32_output_is_explicit(tmp_path, imagej_file):
     path, stack = imagej_file
     params = FlowParameters(mode="xyz", output_dtype="float32")
-    manifest = run_flow(
-        ImageSpec(path, "TZCYX", channel=1), inspect_tiff(path), params, tmp_path / "f32", "f"
-    )
+    manifest = run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), params, tmp_path / "f32", "f")
     assert manifest["outputs"][0]["files"]["vx"]["dtype"] == "float32"
     assert manifest["identity"]["parameters"]["output_dtype"] == "float32"
 
@@ -120,22 +117,6 @@ def test_resource_estimate_full_size_dataset(tmp_path):
     assert estimate.n_outputs == 9
     assert 10e9 < estimate.peak_ram_bytes < 12e9
     assert estimate.output_bytes == 9 * 11 * 1840 * 1840 * 28
-
-
-def test_upstream_process_flow_folder_can_be_opened(tmp_path):
-    folder = tmp_path / "OpticalFlow3D" / "exp"
-    folder.mkdir(parents=True)
-    (folder / "exp_parameters.csv").write_text("xyzSig,tiSig,wSig,Nx,Ny,Nz,Nt\n3,1,4,8,8,3,9\n")
-    for t in (3, 4):
-        for c in ("vx", "vy", "vz", "rel"):
-            tifffile.imwrite(
-                folder / f"exp_{c}_t{t:04d}.tiff", np.zeros((3, 8, 8)), photometric="minisblack"
-            )
-    result = open_upstream_result(folder, "exp")
-    assert not result.verified and [f.source_frame for f in result.frames] == [3, 4]
-    (folder / "exp_rel_t0004.tiff").unlink()
-    with pytest.raises(InputError, match="incomplete"):
-        open_upstream_result(folder, "exp")
 
 
 def test_upstream_licence_ships_with_the_python_files():

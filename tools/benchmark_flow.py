@@ -3,7 +3,7 @@
 Usage::
 
     python tools/benchmark_flow.py --shape 11 1840 1840            # synthetic window
-    python tools/benchmark_flow.py --tiff movie.tif --axes TZYX --frame 3 [--channel 0]
+    python tools/benchmark_flow.py --tiff movie.tif --axes TZYX --frame 3
 
 Prints the wall time, the peak resident memory of this process (``ru_maxrss``) and the
 profiler's estimate, so the estimate in ``flow_backend`` can be checked on real hardware.
@@ -31,7 +31,7 @@ from opticalflow3d_profiler.synthetic import SyntheticMovie, render  # noqa: E40
 def load_window(args: argparse.Namespace, params: FlowParameters) -> np.ndarray:
     """Return one TZYX input window from a TIFF or a synthetic movie."""
     if args.tiff:
-        spec = ImageSpec(Path(args.tiff), args.axes, args.channel)
+        spec = ImageSpec(Path(args.tiff), args.axes)
         half = params.half_window
         frames = list(range(args.frame - half, args.frame + half + 1))
         return read_frames(spec, inspect_tiff(spec.path), frames)
@@ -48,7 +48,6 @@ def main() -> None:
     parser.add_argument("--shape", type=int, nargs=3, default=(11, 512, 512))
     parser.add_argument("--tiff")
     parser.add_argument("--axes", default="")
-    parser.add_argument("--channel", type=int)
     parser.add_argument("--frame", type=int, default=3)
     args = parser.parse_args()
     params = FlowParameters()

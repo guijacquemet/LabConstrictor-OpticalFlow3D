@@ -10,7 +10,7 @@ def test_imagej_header_and_calibration_suggestion(imagej_file):
     path, stack = imagej_file
     header = inspect_tiff(path)
     assert header.shape == stack.shape
-    assert header.header_axes == "TZCYX"
+    assert header.header_axes == "TZYX"
     assert header.format == "ImageJ TIFF"
     cal = header.calibration_suggestion
     assert cal.pixel_size_x == pytest.approx(0.65)
@@ -67,22 +67,25 @@ def test_plain_tiff_axes_are_ambiguous_and_refused_until_confirmed(tmp_path):
     np.testing.assert_array_equal(out, data[2:4])
 
 
-def test_read_frames_selects_channel_and_keeps_dtype(imagej_file):
+def test_multi_channel_videos_are_refused(multichannel_file):
+    path, _ = multichannel_file
+    with pytest.raises(InputError, match="single-channel videos"):
+        read_frames(ImageSpec(path, "TZCYX"), inspect_tiff(path), [0])
+
+
+def test_read_frames_keeps_dtype(imagej_file):
     path, stack = imagej_file
-    header = inspect_tiff(path)
-    with pytest.raises(InputError, match="none was selected"):
-        read_frames(ImageSpec(path, "TZCYX"), header, [0])
-    out = read_frames(ImageSpec(path, "TZCYX", channel=1), header, [4, 1])
+    out = read_frames(ImageSpec(path, "TZYX"), inspect_tiff(path), [4, 1])
     assert out.dtype == stack.dtype
-    np.testing.assert_array_equal(out, stack[[4, 1], :, 1])
+    np.testing.assert_array_equal(out, stack[[4, 1]])
 
 
 def test_other_axis_orders(tmp_path):
-    data = np.random.default_rng(0).integers(0, 999, (3, 8, 2, 6, 7)).astype(np.uint16)
+    data = np.random.default_rng(0).integers(0, 999, (3, 8, 1, 6, 7)).astype(np.uint16)
     path = tmp_path / "zt.tif"
-    tifffile.imwrite(path, data)  # Z T C Y X stored order
+    tifffile.imwrite(path, data)  # Z T C Y X stored order, a C axis of length 1
     header = inspect_tiff(path)
-    out = read_frames(ImageSpec(path, "ZTCYX", channel=0), header, [5])
+    out = read_frames(ImageSpec(path, "ZTCYX"), header, [5])
     np.testing.assert_array_equal(out[0], data[:, 5, 0])
 
 
@@ -96,7 +99,7 @@ def test_yx_must_be_last(tmp_path):
 def test_source_file_is_unchanged(imagej_file):
     path, _ = imagej_file
     before = file_identity(path)
-    read_frames(ImageSpec(path, "TZCYX", channel=1), inspect_tiff(path), [0, 1, 2])
+    read_frames(ImageSpec(path, "TZYX"), inspect_tiff(path), [0, 1, 2])
     assert file_identity(path) == before
 
 
