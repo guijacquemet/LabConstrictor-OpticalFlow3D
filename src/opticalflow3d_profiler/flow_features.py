@@ -17,6 +17,8 @@ from scipy import ndimage
 from .config import Calibration, FeatureSettings
 
 QUANTILES = (10, 25, 75, 90, 95)
+NO_AXIAL = "per-slice 2D optical flow has no axial component"
+AXIAL_COLUMNS = ("vz_mean", "vz_sd", "vz_abs_mean", "axial_lateral_ratio", "coherence_3d_global")
 
 
 @dataclass(frozen=True)
@@ -470,16 +472,22 @@ def frame_features(
     """
     row = FeatureRow({}, {})
     scale = velocity_scale(calibration)
-    vx, vy, vz = flow["vx"] * scale.x, flow["vy"] * scale.y, flow["vz"] * scale.z
-    finite = np.isfinite(vx) & np.isfinite(vy) & np.isfinite(vz)
+    vx, vy = flow["vx"] * scale.x, flow["vy"] * scale.y
+    has_vz = "vz" in flow  # per-slice 2D flow has no axial component
+    vz = flow["vz"] * scale.z if has_vz else np.full(vx.shape, np.nan)
+    finite = np.isfinite(vx) & np.isfinite(vy) & (np.isfinite(vz) if has_vz else True)
     considered = foreground if foreground is not None else np.ones(vx.shape, dtype=bool)
     reliable, threshold = reliability_mask(flow["rel"], considered & finite, settings)
     analysed = considered & finite & reliable
     row.put("qc_reliability_threshold", threshold, "no reliability filtering")
     v = {"x": vx[analysed], "y": vy[analysed], "z": vz[analysed]}
     speed_reason = ""
-    if settings.speed_mode == "xyz" and not scale.consistent:
-        speed_reason = "3D speed needs X, Y, Z and time calibration (one physical unit)"
+    if settings.speed_mode == "xyz" and not (scale.consistent and has_vz):
+        speed_reason = (
+            "3D speed needs X, Y, Z and time calibration (one physical unit)"
+            if has_vz
+            else NO_AXIAL
+        )
         speed_all = np.full(vx.shape, np.nan)
         _put_stats(row, "speed_3d", np.array([]))
         for key in [k for k in row.undefined if k.startswith("speed_3d")]:
@@ -515,4 +523,7 @@ def frame_features(
     )
     _put_quality(row, flow["rel"], considered, finite, analysed, foreground)
     _put_foreground_shape(row, foreground, intensity, settings.intensity_features)
+    if not has_vz:
+        for name in AXIAL_COLUMNS:
+            row.put(name, None, NO_AXIAL)
     return row

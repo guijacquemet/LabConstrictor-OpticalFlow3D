@@ -92,6 +92,36 @@ ramp show the same effect: equalisation removes more than 99 % of the spurious m
 (`tests/profiler/test_brightness.py`). Every output now records
 `qc_brightness_change_per_frame`, and changes above 2 %/frame give a warning.
 
+## Anisotropic stacks: per-slice 2D flow (`FlowParameters.mode`)
+
+Calibration of the first real crop: 0.2537 µm XY, **5 µm Z** (anisotropy 19.7), **60 min** per
+frame. With nuclei only about 1.5 slices deep, the isotropic-in-voxels smoothing of the 3D
+algorithm (about 3 voxels = 15 µm in Z) blurs them across the stack. Synthetic nuclei matched to
+this geometry (σxy 8 px, σz 0.7 slice; recovered/true XY speed):
+
+| True speed (px/frame) | 3D, xyzSig 3 / 6 / 9 | 2D per slice, xySig 3 / 6 / 9 |
+|---|---|---|
+| 1 | 0.41 / 0.35 / 0.34 | 0.95 / 0.87 / 0.81 |
+| 2 | 0.39 / 0.35 / 0.33 | 0.91 / 0.84 / 0.80 |
+| 5 | 0.30 / 0.30 / 0.30 | 0.71 / 0.71 / 0.72 |
+| 10 | 0.16 / 0.20 / 0.21 | 0.36 / 0.43 / 0.51 |
+
+The default `mode="auto"` therefore runs the unchanged upstream `calc_flow2D` on every Z slice
+when the Z spacing exceeds 3× the XY pixel size. The chosen mode is recorded. In this mode there
+is no vz, and axial features are NaN with a reason.
+
+On the real crop, phase correlation of 64 × 64 patches between consecutive frames gives a
+displacement of about 5 px (1.3 µm) per hour for moving patches (90th percentile 10.7 px). That is
+at the edge of what Lucas-Kanade optical flow follows at these settings: even 2D underestimates
+about 30 % at 5 px/frame. **For future acquisitions, 15-20 min intervals** would keep the motion
+at or below 2 px/frame, where 2D is nearly exact.
+
+Results on the crop (median XY speed in the tissue; brightness-equalised input):
+- 3D: about 0.25 µm/h;
+- 2D per slice: about 0.5 µm/h, stable over time (raw input: 1.25 falling to 0.55 µm/h, the
+  brightening artefact);
+- global XY coherence: 0.22-0.49.
+
 ## Resources (measured)
 
 | Input window | Time | Peak RSS | Estimate |

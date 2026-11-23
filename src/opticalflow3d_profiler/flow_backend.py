@@ -33,7 +33,13 @@ from .brightness import (
 )
 from .config import FlowParameters, ImageSpec, to_record
 from .image_io import ImageHeader, dimensions, file_identity, read_frames, validate_image
-from .validation import InputError, check_time_and_depth, output_frame_map, raise_for_errors
+from .validation import (
+    InputError,
+    check_time_and_depth,
+    output_frame_map,
+    raise_for_errors,
+    resolve_flow_mode,
+)
 
 COMPONENTS = ("vx", "vy", "vz", "rel")
 MANIFEST_NAME = "flow_manifest.json"
@@ -216,7 +222,7 @@ def identity_key(identity: dict[str, Any]) -> str:
 
 
 def compute_frame(window: np.ndarray, params: FlowParameters) -> dict[str, np.ndarray]:
-    """Run upstream ``calc_flow3D`` on one TZYX window.
+    """Run upstream ``calc_flow3D`` (or ``calc_flow2D`` per Z slice) on one TZYX window.
 
     Parameters
     ----------
@@ -229,15 +235,27 @@ def compute_frame(window: np.ndarray, params: FlowParameters) -> dict[str, np.nd
     -------
     dict
         ``vx``, ``vy``, ``vz`` (pixels/frame, slices/frame) and ``rel``, as upstream
-        returns them; velocities are cast to ``params.output_dtype``.
+        returns them; velocities are cast to ``params.output_dtype``. In ``xy_per_slice``
+        mode there is no ``vz``: each slice's ``vx``, ``vy`` and ``rel`` come from
+        ``calc_flow2D`` and are stacked along Z.
     """
-    from ._upstream.calc_flow import calc_flow3D  # noqa: PLC0415 (heavy, imported on use)
+    from ._upstream.calc_flow import calc_flow2D, calc_flow3D  # noqa: PLC0415 (heavy)
 
+    dtype = np.dtype(params.output_dtype)
+    sig = (params.xyz_sig, params.t_sig, params.w_sig)
     try:
-        vx, vy, vz, rel = calc_flow3D(window, params.xyz_sig, params.t_sig, params.w_sig)
+        if params.mode == "xy_per_slice":
+            slices = [calc_flow2D(window[:, z], *sig) for z in range(window.shape[1])]
+            return {
+                "vx": np.stack([s[0] for s in slices]).astype(dtype, copy=False),
+                "vy": np.stack([s[1] for s in slices]).astype(dtype, copy=False),
+                "rel": np.stack([s[2] for s in slices]),
+            }
+        if params.mode != "xyz":
+            raise InputError(f"Flow mode '{params.mode}' must be resolved before running.")
+        vx, vy, vz, rel = calc_flow3D(window, *sig)
     except SystemExit as error:  # upstream reports input errors with sys.exit
         raise InputError(f"OpticalFlow3D refused the input: {error}") from error
-    dtype = np.dtype(params.output_dtype)
     return {
         "vx": vx.astype(dtype, copy=False),
         "vy": vy.astype(dtype, copy=False),
@@ -310,6 +328,7 @@ def run_flow(
         For invalid inputs, or when ``out_dir`` already exists.
     """
     report = progress or (lambda _line: None)
+    params = resolve_flow_mode(params, spec.calibration)
     validate_image(spec, header)
     dims = dimensions(spec, header)
     raise_for_errors(check_time_and_depth(dims["T"], dims["Z"], params))
@@ -329,7 +348,7 @@ def run_flow(
         frame, brightness = flow_window(window, params)
         del window
         record = {"output_index": index, "source_frame": t, "files": {}, **brightness}
-        for component in COMPONENTS:
+        for component in frame:
             file_name = f"{name}_{component}_t{t:04d}.tiff"
             record["files"][component] = {
                 "name": file_name,

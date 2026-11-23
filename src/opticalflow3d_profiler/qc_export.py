@@ -91,7 +91,9 @@ def export_fov(
         flow = frame.load()
         foreground = foreground_of(t, intensity)
         considered = foreground if foreground is not None else np.ones(intensity.shape, bool)
-        finite = np.isfinite(flow["vx"]) & np.isfinite(flow["vy"]) & np.isfinite(flow["vz"])
+        finite = np.isfinite(flow["vx"]) & np.isfinite(flow["vy"])
+        if "vz" in flow:
+            finite &= np.isfinite(flow["vz"])
         reliable, _ = reliability_mask(flow["rel"], considered & finite, settings.features)
         if foreground is not None:
             written.append(out / f"foreground_t{t:04d}.png")

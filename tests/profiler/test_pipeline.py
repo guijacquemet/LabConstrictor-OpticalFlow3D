@@ -132,7 +132,7 @@ def test_flow_with_other_parameters_is_not_reused(experiment):
     root, metadata, run, _ = experiment
     new = create_run(root / "results", "run3")
     manifest = run_experiment(
-        metadata.iloc[:1], settings(flow=FlowParameters(w_sig=2)), new, reuse_from=run
+        metadata.iloc[:1], settings(flow=FlowParameters(mode="xyz", w_sig=2)), new, reuse_from=run
     )
     assert manifest["fovs"][0]["status"] == "failed"
     assert "cannot be reused" in manifest["fovs"][0]["message"]
@@ -251,11 +251,34 @@ def test_repeat_labels_are_scoped_to_their_run_unless_shared(experiment, tmp_pat
     assert shared.table.groupby("condition")["repeat_id"].nunique().eq(3).all()
 
 
-def test_shallow_z_warning_is_recorded_per_fov(experiment):
-    _, _, run, _ = experiment
+def test_auto_mode_picks_per_slice_for_anisotropic_stacks(experiment):
+    _, _, run, manifest = experiment
+    assert manifest["settings"]["flow"]["mode"] == "xy_per_slice"  # Z 2.0 / XY 0.65 > 3
     fovs = pd.read_csv(run / "fovs.csv", keep_default_na=False)
     complete = fovs[fovs["status"] == "complete"]
-    assert complete["warnings"].str.contains("shorter than the spatial derivative kernel").all()
+    assert not complete["warnings"].str.contains("spatial derivative kernel").any()
+    frames = pd.read_csv(run / "features" / "features_per_frame.csv")
+    assert frames["vz_mean"].isna().all()
+    assert frames["undefined_features"].str.contains("no axial component").all()
+    flow = next((run / "flow").iterdir())
+    assert not list(flow.glob("*_vz_t*.tiff"))
+
+
+def test_shallow_z_warning_is_recorded_per_fov_in_3d_mode(experiment, tmp_path):
+    _, metadata, _, _ = experiment
+    run = create_run(tmp_path, "xyz")
+    manifest = run_experiment(metadata.iloc[:1], settings(flow=FlowParameters(mode="xyz")), run)
+    assert "shorter than the spatial derivative kernel" in manifest["fovs"][0]["warnings"]
+
+
+def test_3d_speed_is_refused_with_per_slice_flow(experiment, tmp_path):
+    _, metadata, _, _ = experiment
+    bad = settings(
+        flow=FlowParameters(mode="xy_per_slice"),
+        features=FeatureSettings(speed_mode="xyz", reliability_value=1e-3),
+    )
+    with pytest.raises(InputError, match="3D speed needs 3D optical flow"):
+        run_experiment(metadata.iloc[:1], bad, create_run(tmp_path, "bad"))
 
 
 def test_feature_settings_are_checked_before_any_computation(experiment, tmp_path):

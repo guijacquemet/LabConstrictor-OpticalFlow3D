@@ -18,15 +18,15 @@ def codes(issues):
 
 
 def test_default_window_gives_nine_outputs_from_fifteen_frames():
-    params = FlowParameters()
+    params = FlowParameters(mode="xyz")
     assert params.window_length == 7
     assert output_frame_map(15, params) == list(range(3, 12))
     assert output_frame_map(6, params) == []
 
 
 def test_window_length_for_other_t_sig():
-    assert FlowParameters(t_sig=2).window_length == 13
-    assert FlowParameters(t_sig=1.5).window_length == 11  # ceil(9)+1=10, made odd
+    assert FlowParameters(mode="xyz", t_sig=2).window_length == 13
+    assert FlowParameters(mode="xyz", t_sig=1.5).window_length == 11  # ceil(9)+1=10, made odd
 
 
 @pytest.mark.parametrize(
@@ -56,7 +56,7 @@ def test_channel_must_be_chosen_explicitly():
 
 
 def test_too_few_frames_and_single_z():
-    params = FlowParameters()
+    params = FlowParameters(mode="xyz")
     assert codes(check_time_and_depth(6, 11, params)) == {"too_few_frames"}
     assert codes(check_time_and_depth(15, 1, params)) == {"single_z"}
     warnings = {i.code for i in check_time_and_depth(15, 11, params)}

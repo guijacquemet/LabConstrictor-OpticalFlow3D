@@ -244,6 +244,16 @@ class FlowStep:
         self.xyz = widgets.FloatText(value=3.0, description="xyzSig (voxels)", style=STYLE)
         self.tsig = widgets.FloatText(value=1.0, description="tSig (frames)", style=STYLE)
         self.wsig = widgets.FloatText(value=4.0, description="wSig (voxels)", style=STYLE)
+        self.mode = widgets.Dropdown(
+            options=[
+                ("auto: per-slice 2D if Z step > 3x XY pixel, else 3D", "auto"),
+                ("3D (calc_flow3D)", "xyz"),
+                ("2D per Z slice (calc_flow2D)", "xy_per_slice"),
+            ],
+            description="Flow mode",
+            style=STYLE,
+            layout=WIDE,
+        )
         self.equalise = widgets.Dropdown(
             options=[
                 ("none: raw intensities (default)", "none"),
@@ -287,6 +297,7 @@ class FlowStep:
         return widgets.VBox(
             [
                 widgets.HBox([self.xyz, self.tsig, self.wsig]),
+                self.mode,
                 self.dtype,
                 self.equalise,
                 widgets.HTML(
@@ -311,7 +322,12 @@ class FlowStep:
     def parameters(self) -> FlowParameters:
         """Return the upstream parameters from the widgets."""
         return FlowParameters(
-            self.xyz.value, self.tsig.value, self.wsig.value, self.dtype.value, self.equalise.value
+            self.xyz.value,
+            self.tsig.value,
+            self.wsig.value,
+            self.dtype.value,
+            self.equalise.value,
+            self.mode.value,
         )
 
     def metadata(self) -> pd.DataFrame:

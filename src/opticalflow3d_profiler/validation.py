@@ -9,10 +9,16 @@ a calibration value.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
-from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec
+from .config import (
+    AUTO_PER_SLICE_ANISOTROPY,
+    Calibration,
+    FeatureSettings,
+    FlowParameters,
+    ForegroundSpec,
+)
 
 Severity = Literal["error", "warning"]
 
@@ -222,6 +228,8 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
                 "Use a longer movie or a smaller tSig.",
             )
         )
+    if params.mode == "xy_per_slice":
+        return issues
     if n_z < 2:
         issues.append(
             Issue(
@@ -245,6 +253,26 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
             )
         )
     return issues
+
+
+def resolve_flow_mode(params: FlowParameters, calibration: Calibration) -> FlowParameters:
+    """Return the parameters with a concrete flow mode (``auto`` resolved from anisotropy).
+
+    Raises
+    ------
+    InputError
+        When ``auto`` cannot decide because the XY or Z voxel size is unknown.
+    """
+    if params.mode != "auto":
+        return params
+    xy, z = calibration.pixel_size_x, calibration.pixel_size_z
+    if xy is None or z is None:
+        raise InputError(
+            "The flow mode 'auto' needs the XY pixel size and the Z spacing; enter "
+            "them, or choose 'xyz' (3D) or 'xy_per_slice' (2D per slice)."
+        )
+    mode = "xy_per_slice" if z / xy > AUTO_PER_SLICE_ANISOTROPY else "xyz"
+    return replace(params, mode=mode)
 
 
 def output_frame_map(n_t: int, params: FlowParameters) -> list[int]:

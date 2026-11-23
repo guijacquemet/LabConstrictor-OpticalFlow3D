@@ -17,6 +17,9 @@ ReliabilityMode = Literal["absolute", "percentile", "none"]
 ForegroundMode = Literal["mask", "threshold", "none"]
 OutputDtype = Literal["float64", "float32"]
 BrightnessEqualisation = Literal["none", "global_mean", "histogram_match"]
+FlowMode = Literal["auto", "xyz", "xy_per_slice"]
+AUTO_PER_SLICE_ANISOTROPY = 3.0
+"""In ``auto`` mode, Z spacing / XY pixel size above this selects per-slice 2D flow."""
 MaskPlaneRule = Literal["", "same_mask_for_every_z"]
 
 CANONICAL_AXES = "TZYX"
@@ -70,6 +73,13 @@ class FlowParameters:
     output_dtype
         Precision of the saved velocity files. ``float64`` is what upstream returns and
         writes; ``float32`` halves the disk use and is recorded as a deliberate choice.
+    mode
+        ``"xyz"``: upstream ``calc_flow3D`` on each Z-stack (vx, vy, vz). ``"xy_per_slice"``:
+        upstream ``calc_flow2D`` on every Z slice separately (vx, vy; no vz). ``"auto"``
+        (default) chooses per-slice when the Z spacing is more than
+        :data:`AUTO_PER_SLICE_ANISOTROPY` times the XY pixel size and needs that calibration;
+        the chosen mode is recorded. On nuclei 1.5 slices deep, 3D recovered 0.30-0.41x of
+        the XY speed and per-slice 2D 0.91-0.95x (docs/validation.md).
     brightness_equalisation
         ``"none"`` (default): upstream receives the raw intensities. ``"global_mean"``
         (opt-in): within each time window, every frame is scaled so that its mean equals
@@ -85,6 +95,7 @@ class FlowParameters:
     w_sig: float = 4.0
     output_dtype: OutputDtype = "float64"
     brightness_equalisation: BrightnessEqualisation = "none"
+    mode: FlowMode = "auto"
 
     @property
     def window_length(self) -> int:
