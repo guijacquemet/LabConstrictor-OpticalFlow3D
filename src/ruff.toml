@@ -1,0 +1,25 @@
+# Ruff configuration of the OpticalFlow3D Profiler package (MorphoBricks spec §9 rules).
+# The repository-root ruff.toml belongs to the LabConstrictor template and keeps 160 columns
+# for the template's own scripts; this file applies to everything under src/.
+line-length = 100
+target-version = "py311"
+# Unchanged upstream copy (see src/opticalflow3d_profiler/_upstream/README.md).
+extend-exclude = ["opticalflow3d_profiler/_upstream/calc_flow.py"]
+
+[lint]
+select = ["E", "W", "F", "I", "B", "UP", "NPY", "D", "C90", "PLR0913", "PLR0915", "ANN",
+          "PGH004", "BLE", "SIM"]
+ignore = ["D105", "D107"]
+
+[lint.pydocstyle]
+convention = "numpy"
+
+[lint.mccabe]
+max-complexity = 15
+
+[lint.pylint]
+max-args = 8
+max-statements = 50
+
+[lint.isort]
+required-imports = ["from __future__ import annotations"]
