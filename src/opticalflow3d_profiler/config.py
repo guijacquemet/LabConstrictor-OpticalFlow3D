@@ -190,6 +190,10 @@ class FeatureSettings:
         would always look perfectly aligned).
     min_local_vectors
         Minimum analysed nonzero vectors in a local-coherence window.
+    intensity_features
+        Also report intensity-based columns (``qc_foreground_intensity_mean``). Off by
+        default: the profiler measures dynamics; reliability and brightness-change QC are
+        always reported because they qualify the optical flow itself.
     """
 
     speed_mode: SpeedMode = "xy"
@@ -204,6 +208,7 @@ class FeatureSettings:
     min_direction_speed: float = 0.0
     min_direction_vectors: int = 20
     min_local_vectors: int = 5
+    intensity_features: bool = False
 
 
 def to_record(value: object) -> object:

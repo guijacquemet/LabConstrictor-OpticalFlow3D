@@ -406,10 +406,15 @@ def _put_quality(
 
 
 def _put_foreground_shape(
-    row: FeatureRow, foreground: np.ndarray | None, intensity: np.ndarray | None
+    row: FeatureRow,
+    foreground: np.ndarray | None,
+    intensity: np.ndarray | None,
+    with_intensity: bool,
 ) -> None:
-    """Store intensity and foreground-object size QC (confounders of the gain)."""
-    if intensity is None:
+    """Store foreground-object size QC and, if asked, intensity QC (confounders of the gain)."""
+    if not with_intensity:
+        pass
+    elif intensity is None:
         row.put("qc_foreground_intensity_mean", None, "source intensities were not supplied")
     elif foreground is None:
         row.put("qc_foreground_intensity_mean", None, "no foreground was defined")
@@ -509,5 +514,5 @@ def frame_features(
         row, np.where(analysed, speed_all, np.nan), vx, vy, analysed, settings, speed_reason
     )
     _put_quality(row, flow["rel"], considered, finite, analysed, foreground)
-    _put_foreground_shape(row, foreground, intensity)
+    _put_foreground_shape(row, foreground, intensity, settings.intensity_features)
     return row

@@ -212,7 +212,7 @@ def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
     frames = pd.read_csv(run / "features" / "features_per_frame.csv")
     assert sorted(frames["source_frame"]) == [3, 4]
     assert manifest["fovs"][0]["flow_origin"].startswith("external, not verified")
-    assert frames["qc_foreground_intensity_mean"].isna().all()
+    assert "qc_foreground_intensity_mean" not in frames.columns  # intensity QC is opt-in
     with pytest.raises(InputError, match="needs the original image"):
         external_features(folder, "exp", row, settings(), create_run(tmp_path, "ext2"))
 

@@ -85,3 +85,9 @@ def test_relative_paths_resolve_against_the_csv(tmp_path):
     pd.DataFrame([metadata(input_path="images/a.tif")]).to_csv(tmp_path / "m.csv", index=False)
     table = read_metadata(tmp_path / "m.csv")
     assert table.loc[0, "input_path"] == (tmp_path.resolve() / "images/a.tif").as_posix()
+
+
+def test_intensity_columns_are_opt_in_in_the_dictionary():
+    names = {d.name for d in frame_dictionary("xy")}
+    assert "qc_foreground_intensity_mean" not in names
+    assert "qc_foreground_intensity_mean" in {d.name for d in frame_dictionary("xy", True)}
