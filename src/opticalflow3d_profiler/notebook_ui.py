@@ -47,6 +47,7 @@ from .validation import (
     InputError,
     check_calibration,
     check_time_and_depth,
+    raise_for_errors,
     to_micrometres,
     to_minutes,
 )
@@ -369,8 +370,10 @@ class SettingsStep:
         """Print the memory, disk and time estimate for one field of view."""
         settings = self.run_settings()
         header = self.session.header
+        dims = dimensions(self.session.spec, header)
+        raise_for_errors(check_time_and_depth(dims["T"], dims["Z"], settings.flow))
         found = estimate_resources(
-            dimensions(self.session.spec, header),
+            dims,
             np.dtype(header.dtype).itemsize,
             settings.flow,
             self.session.results_root or Path("."),

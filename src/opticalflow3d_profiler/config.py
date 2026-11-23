@@ -102,7 +102,10 @@ class FlowParameters:
         Upstream ``process_flow`` uses ``6*tSig + 1`` frames, made odd; the central frame
         is the analysed one.
         """
-        length = math.ceil(6 * self.t_sig) + 1
+        span = 6 * self.t_sig
+        if not math.isfinite(span):  # 1e308 overflows: a named error, never OverflowError
+            raise ValueError(f"tSig={self.t_sig} is too large: its time window has no length.")
+        length = math.ceil(span) + 1
         return length if length % 2 else length + 1
 
     @property
