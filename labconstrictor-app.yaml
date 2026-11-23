@@ -34,4 +34,5 @@ quickstart:
   - Extract features with a foreground and a reliability threshold.
   - Compare conditions and export the results.
 categories: [optical flow, nuclei, cell migration, 3D time-lapse, motion]
+icon: app/logo/opticalflow3d_profiler_icon.png
 homepage: https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D

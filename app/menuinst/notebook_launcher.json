@@ -15,7 +15,7 @@
       ],
       "platforms": {
         "win": {
-          "icon": "",
+          "icon": "BASE_PATH_KEYWORD/OpticalFlow3D Profiler/opticalflow3d_profiler_icon.ico",
           "command": [
             "{{ PYTHON }}",
             "{{ PREFIX }}/OpticalFlow3D Profiler/launch_jupyter.py",
@@ -25,10 +25,10 @@
           ]
         },
         "linux": {
-          "icon": ""
+          "icon": "BASE_PATH_KEYWORD/OpticalFlow3D Profiler/opticalflow3d_profiler_icon.png"
         },
         "osx": {
-          "icon": ""
+          "icon": "BASE_PATH_KEYWORD/OpticalFlow3D Profiler/opticalflow3d_profiler_icon.icns"
         }
       }
     }
