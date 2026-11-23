@@ -20,7 +20,9 @@ Guidance for AI agents and people changing this repository.
   `notebook_analysis_ui.build()`.
 - `tests/profiler/`, `tools/check_profiler.py`, `tools/benchmark_flow.py`, `docs/validation.md`.
 - Everything else (`.tools`, `.github/workflows` except `profiler_checks.yml`, `app/`,
-  `construct.yaml`) belongs to the LabConstrictor template. Do not edit it by hand.
+  `construct.yaml`) belongs to the LabConstrictor template. Do not edit it by hand, except
+  the app images: `app/logo/` is drawn by `tools/draw_icon.py` and referenced by the image keys
+  and icon `extra_files` of `construct.yaml` and the icons of `app/menuinst/notebook_launcher.json`.
 
 ## Rules (MorphoBricks spec §9 conventions, without MorphoBricks dependencies)
 
