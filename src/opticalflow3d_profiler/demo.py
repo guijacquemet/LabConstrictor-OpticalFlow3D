@@ -10,7 +10,7 @@ checks the results against the ground truth:
   one unreadable TIFF (its failure must be recorded, not skipped).
 
 Every intermediate file is kept: input TIFFs, optical-flow TIFFs and
-manifests, feature tables, QC figures, PCA and comparison exports, and ``demo_report.md``
+manifests, feature tables, QC figures, the MorphoCoverage report, and ``demo_report.md``
 with each expectation, its observed value and PASS or FAIL. Expected ranges for speeds
 include the documented gain bias of the 3D algorithm (docs/validation.md).
 """
@@ -25,15 +25,13 @@ from pathlib import Path
 import pandas as pd
 import tifffile
 
-from . import figures
-from .analysis import analyse, compare_conditions, export_analysis, load_runs
-from .comparison import ComparisonSettings
+from .analysis import load_runs
 from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, to_record
+from .coverage import Design, run_report
 from .experiment import read_experiment_folder
 from .flow_store import open_result
 from .naming import ColumnNames
 from .pipeline import RunSettings, run_experiment
-from .profile_analysis import PcaSettings
 from .qc_export import export_qc_figures
 from .results import create_run, write_csv, write_text_atomic
 from .synthetic import SyntheticMovie, render
@@ -250,53 +248,32 @@ def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
 
 
 def check_analysis(checks: Checks, run: Path, out: Path, design: DemoDesign) -> None:
-    """Run and check the PCA and the condition comparison; export them with figures."""
+    """Run MorphoCoverage on the run and check its verdict on coherence (drug vs ctrl)."""
     features = load_runs([run])
-    settings = PcaSettings()
-    result = analyse(features, settings)
-    comparison_settings = ComparisonSettings("ctrl")
-    comparison = compare_conditions(features, comparison_settings)
-    export_analysis(out, features, settings, result, comparison, comparison_settings)
-    figures.save(
-        figures.pca_scatter(result.scores, result.explained_variance_ratio),
-        out / "figures" / "pca_pc1_pc2.png",
-    )
-    figures.save(figures.pca_loadings(result.loadings), out / "figures" / "pca_loadings.png")
-    figures.save(
-        figures.correlation_heatmap(result.prepared.matrix.corr()),
-        out / "figures" / "feature_correlation.png",
-    )
-    for key in ("speed_xy_median", "coherence_xy_global"):
-        figures.save(
-            figures.condition_plot(features.table, NAMES.column(key), key),
-            out / "figures" / f"condition_{key}.png",
-        )
-    pc1 = result.scores.groupby("condition")["PC1"]
-    separated = pc1.max().min() < pc1.min().max()
-    checks.add(
-        "PCA: PC1 separates the conditions",
-        "no overlap on PC1",
-        f"ranges {pc1.min().round(2).to_dict()} to {pc1.max().round(2).to_dict()}",
-        bool(separated),
-    )
-    tests = comparison[0].set_index("feature")
-    coherence = tests.loc[NAMES.column("coherence_xy_global")]
-    checks.add(
-        "comparison: FOVs and paired repeats",
-        f"{design.repeats * design.fovs_per_repeat} FOVs a side, {design.repeats} repeats paired",
-        f"{coherence['fovs']}/{coherence['control_fovs']} FOVs, "
-        f"{coherence['repeats_paired']} repeats",
-        coherence["repeats_paired"] == design.repeats
-        and coherence["fovs"] == design.repeats * design.fovs_per_repeat,
+    coherence_column = NAMES.column("coherence_xy_global")
+    path, result, _ = run_report(
+        features, Design("ctrl", NAMES.column("speed_xy_median"), repeats_paired=True), out
     )
     checks.add(
-        "comparison: coherence higher in drug in every repeat",
-        "d > 0, q_screen <= 0.05, direction +++",
-        f"d {coherence['d_fovs']:.2f}, q {coherence['q_screen']:.4f}, "
-        f"{coherence['direction_per_repeat']}",
-        coherence["d_fovs"] > 0
-        and coherence["q_screen"] <= 0.05
-        and coherence["direction_per_repeat"] == "+" * design.repeats,
+        "MorphoCoverage report written",
+        "report.html",
+        path.name if path.is_file() else "missing",
+        path.is_file(),
+    )
+    tests = result.discovery.tests.set_index("feature")
+    row = tests.loc[coherence_column]
+    fovs = design.repeats * design.fovs_per_repeat
+    checks.add(
+        "MorphoCoverage: FOVs and repeats",
+        f"{fovs} FOVs a side (the observation), {design.repeats} repeats",
+        f"{row['observations']}/{row['control_observations']} FOVs, {row['repeats']} repeats",
+        int(row["observations"]) == fovs and int(row["repeats"]) == design.repeats,
+    )
+    checks.add(
+        "MorphoCoverage: coherence higher in drug in every repeat",
+        "d > 0, higher in all repeats, significant across repeats",
+        f"d {row['d']:.2f}, higher in {row['higher']}, confirmed {bool(row['confirmed'])}",
+        row["d"] > 0 and int(row["higher"]) == design.repeats and bool(row["confirmed"]),
     )
 
 
@@ -375,7 +352,7 @@ def run_demo(
     export_qc_figures(run, settings)
     checks = Checks()
     check_run(checks, run, design)
-    progress("Step 4-5: PCA, comparison and export...")
+    progress("Section 4: MorphoCoverage report...")
     check_analysis(checks, run, run / "analysis" / "demo", design)
     progress("Re-extraction on the whole image (reusing the flow)...")
     whole_run = create_run(folder / "results", "run-whole-image")

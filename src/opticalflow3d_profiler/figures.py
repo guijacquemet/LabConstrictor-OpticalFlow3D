@@ -1,8 +1,8 @@
-"""Matplotlib figures of images, flow fields, features, PCA and condition comparisons.
+"""Matplotlib figures of images, flow fields and features (quality control).
 
-Figures only display results computed elsewhere. Conditions use a fixed categorical order
-(validated palette, assigned by sorted condition name, never cycled); biological repeats
-are also distinguished by marker shape so identity never relies on colour alone.
+Figures only display results computed elsewhere: raw intensities on their own scale, flow
+vectors, speed and reliability, foreground outlines and per-frame features. Condition
+comparisons are drawn by MorphoCoverage's report (:mod:`~opticalflow3d_profiler.coverage`).
 """
 
 from __future__ import annotations
@@ -14,34 +14,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 
-from .comparison import repeat_column
-
-CATEGORICAL = (
-    "#2a78d6",
-    "#eb6834",
-    "#1baf7a",
-    "#eda100",
-    "#e87ba4",
-    "#008300",
-    "#6250d6",
-    "#e34948",
-)
-MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
 INK, MUTED = "#0b0b0b", "#52514e"
-
-
-def condition_colours(conditions: list[str]) -> dict[str, str]:
-    """Return a fixed colour per condition (sorted names, first eight slots).
-
-    Raises
-    ------
-    ValueError
-        With more than eight conditions (split the comparison instead).
-    """
-    names = sorted(set(conditions))
-    if len(names) > len(CATEGORICAL):
-        raise ValueError("More than eight conditions cannot be told apart in one plot.")
-    return dict(zip(names, CATEGORICAL, strict=False))
+ACCENT, OUTLINE = "#2a78d6", "#eb6834"
 
 
 def _style(ax: plt.Axes) -> None:
@@ -130,112 +104,10 @@ def feature_histograms(table: pd.DataFrame, columns: list[str], units: str = "")
     fig, axes = plt.subplots(1, len(columns), figsize=(4 * len(columns), 3.2), squeeze=False)
     for ax, column in zip(axes[0], columns, strict=True):
         values = pd.to_numeric(table[column], errors="coerce")
-        ax.hist(values.dropna(), bins=20, color=CATEGORICAL[0], edgecolor="white")
+        ax.hist(values.dropna(), bins=20, color=ACCENT, edgecolor="white")
         ax.set_title(f"{column}\n({int(values.isna().sum())} undefined)", fontsize=9)
         ax.set_xlabel(units)
         _style(ax)
-    fig.tight_layout()
-    return fig
-
-
-def _scatter_groups(ax: plt.Axes, table: pd.DataFrame, x: str, y: str, size: float) -> None:
-    """Scatter points coloured by condition and shaped by biological repeat."""
-    colours = condition_colours(table["condition"].tolist())
-    column = repeat_column(table)
-    repeats = sorted(table[column].unique())
-    for (condition, repeat), group in table.groupby(["condition", column]):
-        ax.scatter(
-            group[x],
-            group[y],
-            s=size,
-            color=colours[condition],
-            marker=MARKERS[repeats.index(repeat) % len(MARKERS)],
-            edgecolor="white",
-            linewidth=1,
-            label=f"{condition} / {repeat}",
-        )
-
-
-def pca_scatter(scores: pd.DataFrame, explained: list[float]) -> Figure:
-    """PC1 against PC2, coloured by condition, marker per biological repeat."""
-    fig, ax = plt.subplots(figsize=(6.5, 5))
-    _scatter_groups(ax, scores, "PC1", "PC2", 60)
-    ax.set_xlabel(f"PC1 ({explained[0]:.0%} of variance)")
-    ax.set_ylabel(f"PC2 ({explained[1]:.0%} of variance)")
-    ax.set_title("Exploratory PCA of FOV motion profiles", color=INK)
-    ax.legend(
-        title="condition / biological repeat",
-        fontsize=8,
-        frameon=False,
-        bbox_to_anchor=(1.02, 1),
-        loc="upper left",
-    )
-    _style(ax)
-    fig.tight_layout()
-    return fig
-
-
-def pca_loadings(loadings: pd.DataFrame, component: str = "PC1", top: int = 15) -> Figure:
-    """Horizontal bars of the largest absolute loadings of one component."""
-    data = loadings.reindex(loadings[component].abs().sort_values().index)[-top:]
-    fig, ax = plt.subplots(figsize=(7, 0.3 * len(data) + 1.2))
-    ax.barh(data["feature"], data[component], color=CATEGORICAL[0], height=0.6)
-    ax.axvline(0, color=MUTED, linewidth=0.8)
-    ax.set_title(f"Top {len(data)} loadings of {component}", color=INK)
-    ax.tick_params(axis="y", labelsize=7)
-    _style(ax)
-    fig.tight_layout()
-    return fig
-
-
-def correlation_heatmap(corr: pd.DataFrame) -> Figure:
-    """Pearson correlation between PCA input features (diverging, neutral at 0)."""
-    n = len(corr)
-    fig, ax = plt.subplots(figsize=(0.18 * n + 3, 0.18 * n + 2.5))
-    shown = ax.imshow(corr.to_numpy(), cmap="RdBu_r", vmin=-1, vmax=1)
-    ax.set_xticks(range(n), corr.columns, rotation=90, fontsize=5)
-    ax.set_yticks(range(n), corr.index, fontsize=5)
-    fig.colorbar(shown, ax=ax, fraction=0.03, label="Pearson r")
-    ax.set_title("Feature correlation", color=INK)
-    fig.tight_layout()
-    return fig
-
-
-def condition_plot(table: pd.DataFrame, feature: str, label: str, unit: str = "") -> Figure:
-    """Fields of view (small) and biological-repeat means (large) per condition."""
-    fig, ax = plt.subplots(figsize=(4.5, 4))
-    conditions = sorted(table["condition"].unique())
-    colours = condition_colours(conditions)
-    column = repeat_column(table)
-    repeats = sorted(table[column].unique())
-    rng = np.random.default_rng(0)
-    for i, condition in enumerate(conditions):
-        sub = table[table["condition"] == condition]
-        values = pd.to_numeric(sub[feature], errors="coerce")
-        ax.scatter(
-            i + rng.uniform(-0.12, 0.12, len(sub)),
-            values,
-            s=14,
-            color=colours[condition],
-            alpha=0.45,
-            linewidth=0,
-        )
-        means = values.groupby(sub[column]).mean()
-        for repeat, mean in means.items():
-            ax.scatter(
-                i + 0.28,
-                mean,
-                s=70,
-                color=colours[condition],
-                edgecolor="white",
-                marker=MARKERS[repeats.index(repeat) % len(MARKERS)],
-                zorder=3,
-            )
-        ax.hlines(means.mean(), i - 0.2, i + 0.4, color=INK, linewidth=2)
-    ax.set_xticks(range(len(conditions)), conditions)
-    ax.set_ylabel(f"{feature}" + (f" ({unit})" if unit else ""), fontsize=8)
-    ax.set_title(f"{label}\nsmall: FOVs; large: repeat means; bar: mean of repeats", fontsize=9)
-    _style(ax)
     fig.tight_layout()
     return fig
 
@@ -264,9 +136,7 @@ def foreground_overlay(intensity: np.ndarray, foreground: np.ndarray, z: int, ti
     axes[0].imshow(intensity[z], cmap="gray")
     axes[0].set_title("Raw intensity")
     axes[1].imshow(intensity[z], cmap="gray")
-    axes[1].contour(
-        foreground[z].astype(float), levels=[0.5], colors=[CATEGORICAL[1]], linewidths=1
-    )
+    axes[1].contour(foreground[z].astype(float), levels=[0.5], colors=[OUTLINE], linewidths=1)
     axes[1].set_title(f"Foreground outline ({foreground[z].mean():.1%} of slice)")
     for ax in axes:
         ax.set_axis_off()
@@ -282,7 +152,7 @@ def feature_timeseries(frames: pd.DataFrame, columns: list[str], time: str) -> F
             frames[time],
             pd.to_numeric(frames[column], errors="coerce"),
             "o-",
-            color=CATEGORICAL[0],
+            color=ACCENT,
             linewidth=2,
             markersize=6,
         )

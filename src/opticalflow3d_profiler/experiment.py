@@ -144,3 +144,12 @@ def replicate_counts(table: pd.DataFrame) -> pd.DataFrame:
             "fields_of_view": grouped["fov_uid"].nunique(),
         }
     ).reset_index()
+
+
+def repeat_column(table: pd.DataFrame) -> str:
+    """Return the column identifying biological repeats (``repeat_id`` when present).
+
+    ``repeat_id`` (written by :func:`~opticalflow3d_profiler.analysis.load_runs`, scoped to
+    its run unless the labels are declared shared) takes precedence over the raw label.
+    """
+    return "repeat_id" if "repeat_id" in table.columns else "biological_repeat"

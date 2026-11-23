@@ -1,4 +1,4 @@
-"""Load per-FOV feature tables from runs, run PCA and comparisons, export results (I/O).
+"""Load and combine the per-FOV feature tables of one or more runs (I/O).
 
 Several runs (experiments) can be combined only when their feature dictionaries agree on
 units and speed mode, so that a column means the same thing in every row.
@@ -12,13 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from .comparison import ComparisonSettings
-from .comparison import compare_conditions as compare_tables
-from .config import to_record
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
-from .profile_analysis import PcaResult, PcaSettings, correlation_matrix, prepare_matrix, run_pca
-from .results import environment, now, write_csv, write_json
 from .validation import InputError
 
 
@@ -146,81 +141,6 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
 
 
 def metadata_columns(table: pd.DataFrame) -> list[str]:
-    """Return the identification columns of a combined table (never PCA inputs)."""
+    """Return the identification columns of a combined table (never features)."""
     columns = ("run", "repeat_id", *METADATA_COLUMNS, "undefined_features")
     return [c for c in columns if c in table.columns]
-
-
-def analyse(features: FeatureSet, settings: PcaSettings) -> PcaResult:
-    """Prepare the matrix and run the PCA (see :mod:`profile_analysis`)."""
-    prepared = prepare_matrix(
-        features.table, metadata_columns(features.table), features.fov_defs, settings
-    )
-    return run_pca(prepared, settings.n_components)
-
-
-def export_analysis(
-    out_dir: Path,
-    features: FeatureSet,
-    settings: PcaSettings,
-    result: PcaResult,
-    comparison: tuple[pd.DataFrame, pd.DataFrame] | None = None,
-    comparison_settings: ComparisonSettings | None = None,
-) -> None:
-    """Write scores, loadings, settings, matrix, exclusions and comparisons.
-
-    Parameters
-    ----------
-    out_dir
-        Analysis folder (created if needed). Existing files of the same name are
-        replaced atomically; use a new folder to keep an earlier analysis.
-    features
-        Combined features.
-    settings
-        PCA settings.
-    result
-        PCA result.
-    comparison
-        Optional ``(tests, per_repeat)`` from :func:`compare_conditions`.
-    comparison_settings
-        The settings of that comparison (recorded).
-    """
-    out_dir = Path(out_dir)
-    prepared = result.prepared
-    write_csv(out_dir / "pca_scores.csv", result.scores)
-    write_csv(out_dir / "pca_loadings.csv", result.loadings)
-    write_csv(out_dir / "pca_feature_matrix.csv", prepared.matrix.reset_index())
-    write_csv(out_dir / "pca_scaling.csv", result.scaling)
-    write_csv(
-        out_dir / "feature_correlation.csv",
-        correlation_matrix(prepared).reset_index(names="feature"),
-    )
-    if comparison is not None:
-        write_csv(out_dir / "condition_tests.csv", comparison[0])
-        write_csv(out_dir / "condition_tests_per_repeat.csv", comparison[1])
-    write_json(
-        out_dir / "analysis_settings.json",
-        {
-            "created": now(),
-            "environment": environment(),
-            "sources": features.sources,
-            "units": features.units,
-            "pca_settings": to_record(settings),
-            "explained_variance_ratio": result.explained_variance_ratio,
-            "n_fovs": int(prepared.matrix.shape[0]),
-            "n_features": int(prepared.matrix.shape[1]),
-            "excluded_features": prepared.excluded_features,
-            "excluded_fovs": prepared.excluded_fovs,
-            "warnings": prepared.warnings,
-            "standardisation": "z-score per feature (scikit-learn StandardScaler, ddof=0)",
-            "comparison_settings": to_record(comparison_settings) if comparison_settings else None,
-            "comparison_rules": "MorphoCoverage (docs/morphobricks.md): FOV as observation",
-        },
-    )
-
-
-def compare_conditions(
-    features: FeatureSet, settings: ComparisonSettings
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Compare every condition with the control (MorphoCoverage rules, FOV as observation)."""
-    return compare_tables(features.table, features.fov_defs, settings)

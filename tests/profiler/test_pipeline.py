@@ -1,16 +1,11 @@
-"""End-to-end: synthetic experiment -> optical flow -> features -> PCA and comparisons."""
+"""End-to-end: synthetic experiment -> optical flow -> features -> MorphoCoverage report."""
 
 import json
 
 import pandas as pd
 import pytest
 import tifffile
-from opticalflow3d_profiler.analysis import (
-    compare_conditions,
-    export_analysis,
-    load_runs,
-)
-from opticalflow3d_profiler.comparison import ComparisonSettings
+from opticalflow3d_profiler.analysis import load_runs
 from opticalflow3d_profiler.config import (
     Calibration,
     FeatureSettings,
@@ -18,9 +13,7 @@ from opticalflow3d_profiler.config import (
     ForegroundSpec,
 )
 from opticalflow3d_profiler.experiment import read_experiment_folder
-from opticalflow3d_profiler.figures import condition_plot, pca_scatter, save
 from opticalflow3d_profiler.pipeline import RunSettings, run_experiment
-from opticalflow3d_profiler.profile_analysis import PcaSettings, prepare_matrix, run_pca
 from opticalflow3d_profiler.results import create_run
 from opticalflow3d_profiler.synthetic import SyntheticMovie, render
 from opticalflow3d_profiler.validation import InputError
@@ -138,48 +131,25 @@ def test_flow_with_other_parameters_is_not_reused(experiment):
     assert "cannot be reused" in manifest["fovs"][0]["message"]
 
 
-def test_pca_and_comparison_export(experiment):
-    root, _, run, _ = experiment
+def test_morphocoverage_report_from_the_per_fov_table(experiment):
+    from opticalflow3d_profiler.coverage import Design, coverage_input, run_report
+
+    _, _, run, _ = experiment
     features = load_runs([run])
-    pca_settings = PcaSettings()
-    prepared = prepare_matrix(
-        features.table,
-        [
-            "run",
-            "fov_uid",
-            "position_id",
-            "condition",
-            "biological_repeat",
-            "technical_repeat",
-            "image_path",
-            "source_relative_path",
-            "undefined_features",
-        ],
-        features.fov_defs,
-        pca_settings,
-    )
-    assert not any(c.startswith("qc_") for c in prepared.matrix.columns)
-    result = run_pca(prepared, 3)
-    comparison_settings = ComparisonSettings("ctrl", permutations=999, balanced_permutations=199)
-    comparison = compare_conditions(features, comparison_settings)
-    out = run / "analysis"
-    export_analysis(out, features, pca_settings, result, comparison, comparison_settings)
-    scores = pd.read_csv(out / "pca_scores.csv")
-    assert set(scores["condition"]) == {"ctrl", "drug"} and "PC1" in scores
-    settings_json = json.loads((out / "analysis_settings.json").read_text())
-    assert any("not a significance test" in w for w in settings_json["warnings"])
-    tests = pd.read_csv(out / "condition_tests.csv")
-    median = tests[tests["feature"] == SPEED].iloc[0]
-    assert median["repeats_paired"] == 3 and median["d_fovs"] > 0
-    assert (tests["family"] == "qc").any()
-    assert (out / "condition_tests_per_repeat.csv").is_file()
-    assert settings_json["comparison_settings"]["control"] == "ctrl"
-    save(pca_scatter(result.scores, result.explained_variance_ratio), out / "figures/pca.png")
-    save(
-        condition_plot(features.table, SPEED, "median"),
-        out / "figures/median.png",
-    )
-    assert (out / "figures" / "pca.png").stat().st_size > 1000
+    with pytest.raises(InputError, match="Confirm that each biological-repeat label"):
+        coverage_input(features, Design("ctrl", SPEED, repeats_paired=False))
+    data = coverage_input(features, Design("ctrl", SPEED, repeats_paired=True))
+    assert len(data.objects) == 6 and not any(c.startswith("qc_") for c in data.features)
+    assert (data.fovs["repeat_group"] == data.fovs["biological_repeat"]).all()
+    assert data.fovs["biological_repeat"].str.startswith("run1/").all()  # run-scoped repeats
+    out = run / "analysis" / "report-1"
+    path, result, _ = run_report(features, Design("ctrl", SPEED, repeats_paired=True), out)
+    assert path == out / "report.html" and path.stat().st_size > 100_000
+    row = result.discovery.tests.set_index("feature").loc[SPEED]
+    assert row["observations"] == 3 and row["repeats"] == 3 and row["d"] > 0
+    assert (out / "morphocoverage_objects.csv").is_file()
+    with pytest.raises(InputError, match="never overwritten"):
+        run_report(features, Design("ctrl", SPEED, repeats_paired=True), out)
 
 
 def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
@@ -237,8 +207,7 @@ def test_repeat_labels_are_scoped_to_their_run_unless_shared(experiment, tmp_pat
     b = _copy_run(run, tmp_path / "b", "b-")
     scoped = load_runs([a, b])
     assert scoped.table.groupby("condition")["repeat_id"].nunique().eq(6).all()
-    fast = ComparisonSettings("ctrl", permutations=199, balanced_permutations=99)
-    assert compare_conditions(scoped, fast)[0].iloc[0]["repeats_paired"] == 6
+    assert scoped.table["repeat_id"].str.contains("/").all()
     shared = load_runs([a, b], shared_repeat_labels=True)
     assert shared.table.groupby("condition")["repeat_id"].nunique().eq(3).all()
 

@@ -113,7 +113,7 @@ def inspect_tiff(path: Path) -> ImageHeader:
         raise InputError(f"{path.name} could not be read as a TIFF file: {error}") from error
     extra: list[str] = []
     if header.n_series > 1:
-        extra.append(f"The file holds {header.n_series} image series; only the first is used.")
+        extra.append(f"The file holds {header.n_series} image series; it will be refused.")
     if header.axes_ambiguous:
         extra.append(
             f"The header does not name all axes ({header.header_axes}); confirm the "
@@ -216,13 +216,18 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
     Raises
     ------
     InputError
-        When the axes or channel selection are invalid, or Y and X are not the last two
-        axes (pages must be XY planes).
+        When the axes are invalid, the file has several channels or series, or Y and X are
+        not the last two axes (pages must be XY planes).
     """
     issues = check_axes(spec.axes, header.shape) + check_channel(
         spec.axes, header.shape, spec.channel
     )
     raise_for_errors(issues)
+    if header.n_series > 1:
+        raise InputError(
+            f"multiple_series: {header.path.name} holds {header.n_series} image series "
+            "(several positions or scenes); save one field of view per file (MorphoBricks)."
+        )
     if "S" in header.header_axes:
         raise InputError(
             "The file stores samples per pixel (RGB or similar planar samples); "

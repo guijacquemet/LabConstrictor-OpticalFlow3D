@@ -12,7 +12,8 @@ STRUCTURAL = {
     "unreadable TIFF recorded as failed",
     "optical-flow outputs per FOV (verified hashes)",
     "dominant direction drug",
-    "comparison: FOVs and paired repeats",
+    "MorphoCoverage report written",
+    "MorphoCoverage: FOVs and repeats",
     "re-extraction reuses verified flow",
     "whole-image columns (no foreground)",
 }
@@ -32,11 +33,9 @@ def test_demo_runs_and_keeps_intermediate_files(tmp_path):
     for name in (
         "features/features_per_frame.csv",
         "features/feature_dictionary.json",
-        "analysis/demo/pca_scores.csv",
-        "analysis/demo/figures/pca_pc1_pc2.png",
+        "analysis/demo/report.html",
         "run_manifest.json",
         "fovs.csv",
     ):
         assert (run / name).exists(), name
     assert (tmp_path / "demo" / "demo_report.md").read_text().startswith("# Synthetic demo")
-    assert (run / "analysis" / "demo" / "condition_tests.csv").exists()
