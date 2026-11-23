@@ -11,6 +11,7 @@ dependencies:
   - requests==2.32.3
   - umap-learn==0.5.7
   - tqdm==4.70.1
+  - morphobricks-normalization @ git+https://github.com/CellMigrationLab/morphobricks-normalization@b3a81042eb667f85e17a26005ae40c4e0396bbb0
   - morphocoverage @ git+https://github.com/CellMigrationLab/MorphoCoverage@209b9be40a14aef5a5e244a8d031a4828f1e96ef
 description: Quantify nuclear motion in 3D fluorescence time-lapses with OpticalFlow3D, extract motion profiles per field of view and compare conditions with MorphoCoverage.
 python_version: 3.11.13
