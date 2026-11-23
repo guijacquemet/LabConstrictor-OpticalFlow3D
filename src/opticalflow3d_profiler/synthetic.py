@@ -23,7 +23,11 @@ class SyntheticMovie:
     n_nuclei
         Number of blobs.
     velocity
-        ``(vz, vy, vx)`` in voxels per frame, the same for every nucleus.
+        ``(vz, vy, vx)`` in voxels per frame.
+    direction_spread_deg
+        Width of the uniform spread of each nucleus' XY direction around the direction of
+        ``velocity`` (XY speed unchanged): 0 moves every nucleus the same way (collective
+        motion), 360 gives random directions.
     sigma_xy, sigma_z
         Blob standard deviations in voxels.
     amplitude, background
@@ -37,6 +41,7 @@ class SyntheticMovie:
     shape: tuple[int, int, int, int] = (7, 11, 96, 96)
     n_nuclei: int = 20
     velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    direction_spread_deg: float = 0.0
     sigma_xy: float = 4.0
     sigma_z: float = 1.5
     amplitude: float = 1000.0
@@ -59,6 +64,18 @@ def nucleus_centres(movie: SyntheticMovie) -> np.ndarray:
     )
 
 
+def nucleus_velocities(movie: SyntheticMovie) -> np.ndarray:
+    """Return the ``(vz, vy, vx)`` velocity of every nucleus (voxels per frame)."""
+    vz, vy, vx = movie.velocity
+    speed, base = float(np.hypot(vx, vy)), float(np.arctan2(vy, vx))
+    rng = np.random.default_rng(movie.seed + 2)  # independent of positions and noise
+    half = np.deg2rad(movie.direction_spread_deg) / 2
+    angles = base + rng.uniform(-half, half, movie.n_nuclei)
+    return np.column_stack(
+        [np.full(movie.n_nuclei, vz), speed * np.sin(angles), speed * np.cos(angles)]
+    )
+
+
 def render(movie: SyntheticMovie, dtype: str = "uint16") -> np.ndarray:
     """Render the movie as a TZYX array.
 
@@ -78,9 +95,9 @@ def render(movie: SyntheticMovie, dtype: str = "uint16") -> np.ndarray:
     z, y, x = np.meshgrid(np.arange(n_z), np.arange(n_y), np.arange(n_x), indexing="ij")
     out = np.full(movie.shape, movie.background, dtype=np.float64)
     centres = nucleus_centres(movie)
-    velocity = np.asarray(movie.velocity, dtype=np.float64)
+    velocities = nucleus_velocities(movie)
     for t in range(n_t):
-        for centre in centres + velocity * (t - n_t // 2):
+        for centre in centres + velocities * (t - n_t // 2):
             out[t] += movie.amplitude * np.exp(
                 -((x - centre[2]) ** 2 + (y - centre[1]) ** 2) / (2 * movie.sigma_xy**2)
                 - (z - centre[0]) ** 2 / (2 * movie.sigma_z**2)

@@ -15,6 +15,7 @@ from IPython.display import display
 from . import figures
 from .analysis import analyse, compare_conditions, export_analysis, load_runs
 from .config import FeatureSettings, ForegroundSpec
+from .demo import DemoDesign, run_demo
 from .experiment import replicate_counts
 from .external import external_features
 from .notebook_ui import (
@@ -31,6 +32,7 @@ from .notebook_ui import (
 )
 from .pipeline import RunSettings, run_experiment
 from .profile_analysis import PcaSettings
+from .qc_export import export_qc_figures
 from .results import create_run
 from .validation import InputError
 
@@ -78,6 +80,8 @@ class FeatureStep:
         """Return the step's widget tree."""
         run = button("Extract features")
         run.on_click(guarded(self.output, self.extract))
+        qc = button("Save QC figures", "info")
+        qc.on_click(guarded(self.output, self.save_qc))
         return widgets.VBox(
             [
                 self.fg_mode,
@@ -91,10 +95,20 @@ class FeatureStep:
                 widgets.HBox([self.region, self.window]),
                 self.motion,
                 self.new_run,
-                run,
+                widgets.HBox([run, qc]),
                 self.output,
             ]
         )
+
+    def save_qc(self) -> None:
+        """Save input, foreground and flow figures of every field of view of the run."""
+        session = self.session
+        if session.run_dir is None or session.settings is None:
+            raise InputError("Run step 2 first.")
+        features, foreground = self.settings()
+        settings = replace(session.settings, features=features, foreground=foreground)
+        written = export_qc_figures(session.run_dir, settings)
+        print(f"{len(written)} QC figures saved in {session.run_dir / 'qc'}.")
 
     def settings(self) -> tuple[FeatureSettings, ForegroundSpec]:
         """Return the feature and foreground settings from the widgets."""
@@ -343,6 +357,31 @@ class ExternalStep:
         )
 
 
+class DemoStep:
+    """Optional: run every step on a synthetic experiment with a known answer."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.folder = text("New demo folder", placeholder="/path/to/empty/folder")
+        self.small = widgets.Checkbox(value=True, description="Small images (quick, ~3 min)")
+        self.output = widgets.Output()
+
+    def widget(self) -> widgets.Widget:
+        """Return the widget tree."""
+        run = button("Run the synthetic demo")
+        run.on_click(guarded(self.output, self.run))
+        return widgets.VBox([self.folder, self.small, run, self.output])
+
+    def run(self) -> None:
+        """Run the demo and show each expectation with PASS or FAIL."""
+        if not self.folder.value.strip():
+            raise InputError("Choose a new, empty folder.")
+        design = DemoDesign(shape=(15, 11, 96, 96), n_nuclei=14) if self.small.value else None
+        checks = run_demo(Path(self.folder.value.strip()), design, progress=lambda _l: None)
+        display(pd.DataFrame(checks.rows))
+        print("All expectations passed." if checks.passed else "Some expectations FAILED.")
+
+
 def build(session: Session | None = None) -> dict[str, object]:
     """Return the five step objects sharing one session (used by the notebook)."""
     session = session or Session()
@@ -354,4 +393,5 @@ def build(session: Session | None = None) -> dict[str, object]:
         "compare": CompareStep(session),
         "export": ExportStep(session),
         "external": ExternalStep(session),
+        "demo": DemoStep(session),
     }

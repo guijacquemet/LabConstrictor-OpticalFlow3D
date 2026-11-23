@@ -235,11 +235,64 @@ def condition_plot(table: pd.DataFrame, feature: str, label: str, unit: str = ""
     return fig
 
 
-def save(fig: Figure, path: Path) -> None:
-    """Save a figure as PNG (300 dpi) through a temporary file, then close it."""
+def time_montage(planes: list[np.ndarray], titles: list[str], title: str) -> Figure:
+    """Show one Z slice at every time point, on one shared raw-intensity scale."""
+    n = len(planes)
+    cols = min(n, 5)
+    rows = -(-n // cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(3 * cols, 3 * rows), squeeze=False)
+    low = min(float(p.min()) for p in planes)
+    high = max(float(p.max()) for p in planes)
+    for ax in axes.ravel():
+        ax.set_axis_off()
+    for ax, plane, label in zip(axes.ravel(), planes, titles, strict=False):
+        ax.imshow(plane, cmap="gray", vmin=low, vmax=high, interpolation="nearest")
+        ax.set_title(label, fontsize=9)
+    fig.suptitle(title, color=INK)
+    fig.tight_layout()
+    return fig
+
+
+def foreground_overlay(intensity: np.ndarray, foreground: np.ndarray, z: int, title: str) -> Figure:
+    """Show the raw slice next to the foreground outline used for the features."""
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(intensity[z], cmap="gray")
+    axes[0].set_title("Raw intensity")
+    axes[1].imshow(intensity[z], cmap="gray")
+    axes[1].contour(
+        foreground[z].astype(float), levels=[0.5], colors=[CATEGORICAL[1]], linewidths=1
+    )
+    axes[1].set_title(f"Foreground outline ({foreground[z].mean():.1%} of slice)")
+    for ax in axes:
+        ax.set_axis_off()
+    fig.suptitle(title, color=INK)
+    return fig
+
+
+def feature_timeseries(frames: pd.DataFrame, columns: list[str], time: str) -> Figure:
+    """Plot per-frame features of one field of view against time (one panel each)."""
+    fig, axes = plt.subplots(1, len(columns), figsize=(4 * len(columns), 3), squeeze=False)
+    for ax, column in zip(axes[0], columns, strict=True):
+        ax.plot(
+            frames[time],
+            pd.to_numeric(frames[column], errors="coerce"),
+            "o-",
+            color=CATEGORICAL[0],
+            linewidth=2,
+            markersize=6,
+        )
+        ax.set_title(column, fontsize=9)
+        ax.set_xlabel(time)
+        _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def save(fig: Figure, path: Path, dpi: int = 300) -> None:
+    """Save a figure as PNG through a temporary file, then close it."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.stem}.tmp.png")
-    fig.savefig(tmp, dpi=300, bbox_inches="tight")
+    fig.savefig(tmp, dpi=dpi, bbox_inches="tight")
     tmp.replace(path)
     plt.close(fig)

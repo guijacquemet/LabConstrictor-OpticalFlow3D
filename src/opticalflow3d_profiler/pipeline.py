@@ -172,7 +172,7 @@ def frame_rows(
     return rows
 
 
-def _foreground_reader(spec: ForegroundSpec, dims: dict[str, int]) -> tuple[Callable, dict]:
+def foreground_reader(spec: ForegroundSpec, dims: dict[str, int]) -> tuple[Callable, dict]:
     """Return the per-frame foreground function and its provenance description."""
     info: MaskInfo | None = None
     if spec.mode == "mask":
@@ -240,7 +240,7 @@ def process_fov(
         fg_spec = settings.foreground
         if row.get("mask_path"):
             fg_spec = replace(fg_spec, mask_path=Path(row["mask_path"]))
-        foreground_of, fg_record = _foreground_reader(fg_spec, dims)
+        foreground_of, fg_record = foreground_reader(fg_spec, dims)
         rows = frame_rows(
             result, settings, foreground_of, lambda t: read_frames(spec, header, [t])[0]
         )
