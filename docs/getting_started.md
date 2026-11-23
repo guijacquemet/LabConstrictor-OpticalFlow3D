@@ -230,8 +230,11 @@ pixel type, number of series, file size, calibration, notes). You then type the 
   `axes_contradict_header`. Fix the file's metadata instead (for example, re-save it in Fiji with
   the correct hyperstack dimensions).
 - One axis order is confirmed for the **whole run**. On **Confirm**, every image header of the
-  experiment is checked against it (headers only, no pixels read). If any image cannot be
-  processed, the table of problem images is shown and nothing is computed.
+  experiment is checked against it (headers only, no pixels read), and all headers together with
+  MorphoBricks preprocessing's header checks (Z allowed): unreadable files, several series,
+  different pixel types, axis arrangements or channel counts stop the run; different image sizes,
+  plane counts or pixel sizes are listed as notes. If any image cannot be processed, the table of
+  problem images is shown and nothing is computed.
 
 ### 4. Calibration
 

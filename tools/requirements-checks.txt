@@ -11,6 +11,7 @@ natsort==8.4.0
 umap-learn==0.5.7
 tqdm==4.70.1
 morphobricks-normalization @ git+https://github.com/CellMigrationLab/morphobricks-normalization@f2aa7321b24ab49ffe9059154c54eb659741162a
+morphobricks-preprocessing @ git+https://github.com/CellMigrationLab/morphobricks-preprocessing@957158a2557cb57766a4b51d5d9f0254717e9048
 morphocoverage @ git+https://github.com/CellMigrationLab/MorphoCoverage@209b9be40a14aef5a5e244a8d031a4828f1e96ef
 pytest==9.1.1
 ruff==0.15.20

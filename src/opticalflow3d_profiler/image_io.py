@@ -9,18 +9,16 @@ confirm; it is never applied silently, and missing values stay ``None``.
 from __future__ import annotations
 
 import hashlib
-import math
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+import morphobricks_preprocessing as preprocessing
 import numpy as np
 import tifffile
 
 from .config import Calibration, ImageSpec
 from .validation import (
-    LENGTH_TO_MICROMETRE,
-    TIME_TO_MINUTE,
     InputError,
     check_axes,
     check_channel,
@@ -28,6 +26,15 @@ from .validation import (
 )
 
 HASH_CHUNK = 8 * 1024 * 1024
+TIME_UNIT_TO_MINUTE = {
+    "nanosecond": 1 / 6e10,
+    "microsecond": 1 / 6e7,
+    "millisecond": 1 / 60000,
+    "second": 1 / 60,
+    "minute": 1.0,
+    "hour": 60.0,
+}
+"""Minutes per OME-NGFF time unit, the names preprocessing's ``PhysicalSizes`` gives."""
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,11 @@ class ImageHeader:
         Calibration read from the header, to be confirmed by the user.
     notes
         Plain-language remarks about axes and calibration.
+    axes_named
+        Whether preprocessing's ``header_axes`` names every axis (False for a plain stack of
+        pages, whose ``Y`` and ``X`` only say where rows and columns are stored).
+    metadata
+        Preprocessing's ``TiffMetadata`` of the file, for the experiment-wide header checks.
     """
 
     path: Path
@@ -65,15 +77,26 @@ class ImageHeader:
     file_size: int
     calibration_suggestion: Calibration = field(default_factory=Calibration)
     notes: tuple[str, ...] = ()
+    axes_named: bool = True
+    metadata: object = field(default=None, compare=False, repr=False)
 
     @property
     def axes_ambiguous(self) -> bool:
-        """Return True when the header does not name every axis with T, Z, C, Y or X."""
-        return not set(self.header_axes) <= set("TZCYX") or "T" not in self.header_axes
+        """Return True unless the header names every axis, with T among them."""
+        return (
+            not self.axes_named
+            or not set(self.header_axes) <= set("TZCYX")
+            or "T" not in self.header_axes
+        )
 
 
 def inspect_tiff(path: Path) -> ImageHeader:
-    """Read a TIFF header without loading the image.
+    """Read a TIFF header without loading the image, with MorphoBricks preprocessing's reader.
+
+    Shape, pixel type, axes, series count and physical sizes come from
+    ``morphobricks_preprocessing.inspect_tiff`` (contract §20, read with Z allowed); the axes
+    count as named only where preprocessing's ``header_axes`` names them all. The physical
+    sizes are converted to µm and minutes as a *suggestion* for the user to confirm.
 
     Parameters
     ----------
@@ -93,24 +116,29 @@ def inspect_tiff(path: Path) -> ImageHeader:
     path = Path(path)
     if not path.is_file():
         raise InputError(f"The file {path} does not exist.")
+    meta = preprocessing.inspect_tiff(path)
+    if not meta.readable:
+        raise InputError(f"{path.name} could not be read as a TIFF file: {meta.error}")
     try:
         with tifffile.TiffFile(path) as tif:
-            series = tif.series[0]
             fmt = "OME-TIFF" if tif.is_ome else "ImageJ TIFF" if tif.is_imagej else "TIFF"
-            calibration, notes = _header_calibration(tif)
-            header = ImageHeader(
-                path=path,
-                shape=tuple(int(n) for n in series.shape),
-                dtype=str(series.dtype),
-                header_axes=str(series.axes),
-                format=fmt,
-                n_series=len(tif.series),
-                file_size=path.stat().st_size,
-                calibration_suggestion=calibration,
-                notes=tuple(notes),
-            )
+            unstated = _unstated_units(tif)
     except (tifffile.TiffFileError, OSError) as error:
         raise InputError(f"{path.name} could not be read as a TIFF file: {error}") from error
+    calibration, notes = _calibration(meta.physical_sizes, fmt, unstated)
+    header = ImageHeader(
+        path=path,
+        shape=tuple(int(n) for n in meta.shape),
+        dtype=str(meta.dtype),
+        header_axes=meta.axes,
+        format=fmt,
+        n_series=meta.series_count,
+        file_size=path.stat().st_size,
+        calibration_suggestion=calibration,
+        notes=tuple(notes),
+        axes_named=preprocessing.header_axes(meta) is not None,
+        metadata=meta,
+    )
     extra: list[str] = []
     if header.n_series > 1:
         extra.append(f"The file holds {header.n_series} image series; it will be refused.")
@@ -119,109 +147,65 @@ def inspect_tiff(path: Path) -> ImageHeader:
             f"The header does not name all axes ({header.header_axes}); confirm the "
             "axis order before processing."
         )
-    return ImageHeader(**{**header.__dict__, "notes": header.notes + tuple(extra)})
+    return replace(header, notes=header.notes + tuple(extra))
 
 
-def _header_calibration(tif: tifffile.TiffFile) -> tuple[Calibration, list[str]]:
-    """Return the calibration stated in an OME or ImageJ header, with notes."""
-    if tif.is_ome and tif.ome_metadata:
-        return _ome_calibration(tif.ome_metadata)
-    if tif.is_imagej and tif.imagej_metadata is not None:
-        return _imagej_calibration(tif)
-    return Calibration(source="none"), ["The header states no calibration."]
+def _unstated_units(tif: tifffile.TiffFile) -> dict[str, str]:
+    """Return the sizes a header gives without a unit, with the unit they are read in.
 
-
-def _ome_calibration(xml_text: str) -> tuple[Calibration, list[str]]:
-    """Read PhysicalSize and TimeIncrement of the first OME image.
-
-    A missing unit takes the OME schema's default (µm for sizes, s for the time increment),
-    as MorphoBricks preprocessing reads it; every value read this way is named in a note, so
-    the user sees it before confirming the calibration.
+    OME-XML defaults (µm for ``PhysicalSize*``, s for ``TimeIncrement``) are what
+    preprocessing reads; they are named so that the user sees them before confirming.
+    An ImageJ ``finterval`` without ``tunit`` is listed with ``None``: it is not used.
     """
-    root = ET.fromstring(xml_text)
-    pixels = next((el for el in root.iter() if el.tag.endswith("Pixels")), None)
-    if pixels is None:
-        return Calibration(source="none"), ["The OME header has no Pixels element."]
+    found: dict[str, str] = {}
+    if tif.is_ome and tif.ome_metadata:
+        try:
+            root = ET.fromstring(tif.ome_metadata)
+        except ET.ParseError:
+            return found
+        pixels = next((el for el in root.iter() if el.tag.endswith("Pixels")), None)
+        if pixels is not None:
+            named = [(f"PhysicalSize{axis}", "µm") for axis in "XYZ"] + [("TimeIncrement", "s")]
+            for name, unit in named:
+                if pixels.get(name) is not None and pixels.get(f"{name}Unit") is None:
+                    found[name] = unit
+    elif tif.is_imagej:
+        meta = tif.imagej_metadata or {}
+        if meta.get("finterval") is not None and not str(meta.get("tunit", "")).strip():
+            found["finterval"] = None
+    return found
+
+
+def _calibration(
+    sizes: preprocessing.PhysicalSizes, fmt: str, unstated: dict[str, str | None]
+) -> tuple[Calibration, list[str]]:
+    """Convert preprocessing's physical sizes to a calibration suggestion, with notes."""
     notes: list[str] = []
-    sizes = []
-    for axis in "XYZ":
-        sizes.append(
-            _scaled(
-                pixels.get(f"PhysicalSize{axis}"),
-                pixels.get(f"PhysicalSize{axis}Unit", "µm"),
-                LENGTH_TO_MICROMETRE,
-                f"PhysicalSize{axis}",
-                notes,
-            )
+    if fmt == "TIFF":
+        return Calibration(source="none"), ["The header states no calibration."]
+    xyz = [sizes.micrometers(axis) for axis in "XYZ"]
+    interval = None
+    if sizes.t is not None and sizes.time_unit in TIME_UNIT_TO_MINUTE:
+        interval = sizes.t * TIME_UNIT_TO_MINUTE[sizes.time_unit]
+    if "finterval" in unstated:
+        interval = None
+        notes.append(
+            f"finterval={sizes.t} has no time unit in the header; enter the frame interval "
+            "yourself."
         )
-    interval = _scaled(
-        pixels.get("TimeIncrement"),
-        pixels.get("TimeIncrementUnit", "s"),
-        TIME_TO_MINUTE,
-        "TimeIncrement",
-        notes,
-    )
-    defaults = [
-        f"{name} (unit not stated: OME default {unit})"
-        for name, unit, value in (
-            ("PhysicalSizeX", "µm", sizes[0]),
-            ("PhysicalSizeY", "µm", sizes[1]),
-            ("PhysicalSizeZ", "µm", sizes[2]),
-            ("TimeIncrement", "s", interval),
-        )
-        if value is not None and pixels.get(f"{name}Unit") is None
-    ]
+    defaults = [f"{n} (unit not stated: OME default {u})" for n, u in unstated.items() if u]
     if defaults:
         notes.append(
             "Units taken from the OME schema defaults: "
             + ", ".join(defaults)
             + ". Check these values before confirming."
         )
-    return Calibration(*sizes, interval, source="header (OME)"), notes
-
-
-def _imagej_calibration(tif: tifffile.TiffFile) -> tuple[Calibration, list[str]]:
-    """Read XResolution/YResolution, spacing and finterval of an ImageJ header."""
-    meta = tif.imagej_metadata or {}
-    notes: list[str] = []
-    unit = str(meta.get("unit", "")).replace("\\u00B5", "µ").replace("micron", "um")
-    page = tif.pages.first
-    xy = []
-    for tag_name in ("XResolution", "YResolution"):
-        tag = page.tags.get(tag_name)
-        value = None
-        if tag is not None and tag.value[0]:
-            value = tag.value[1] / tag.value[0]
-        xy.append(_scaled(value, unit or "pixel", LENGTH_TO_MICROMETRE, tag_name, notes))
-    z = _scaled(meta.get("spacing"), unit or "pixel", LENGTH_TO_MICROMETRE, "spacing", notes)
-    t_unit = str(meta.get("tunit", "")).strip()
-    interval = None
-    if meta.get("finterval") is not None:
-        if t_unit:
-            interval = _scaled(meta["finterval"], t_unit, TIME_TO_MINUTE, "finterval", notes)
-        else:
-            notes.append(
-                f"finterval={meta['finterval']} has no time unit in the header; "
-                "enter the frame interval yourself."
-            )
-    return Calibration(xy[0], xy[1], z, interval, source="header (ImageJ)"), notes
-
-
-def _scaled(
-    value: object, unit: str, table: dict[str, float], name: str, notes: list[str]
-) -> float | None:
-    """Convert a header value with its unit, or note why it is unusable."""
-    if value is None:
-        return None
-    key = {"micron": "um", "microns": "um", "sec": "s"}.get(unit.strip(), unit.strip())
-    if key not in table:
-        notes.append(f"{name}={value} has unit '{unit}', which is not a physical unit here.")
-        return None
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        notes.append(f"{name}={value} is not a valid positive value.")
-        return None
-    return number * table[key]
+    for axis, unit in sizes.unsupported_units:
+        notes.append(f"The {axis} size is given in '{unit}', which is not converted; enter it.")
+    if sizes.invalid:
+        notes.append(f"The header calibration cannot be used: {sizes.invalid}.")
+    source = "header (OME)" if fmt == "OME-TIFF" else "header (ImageJ)"
+    return Calibration(*xyz, interval, source=source), notes
 
 
 def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
