@@ -1,9 +1,37 @@
 # yaml-language-server: $schema=https://cellmigrationlab.github.io/LabConstrictor-Site/schema/labconstrictor-app.schema.json
 schema: 1
 name: OpticalFlow3D Profiler
-summary: Quantify motion in 3D fluorescence microscopy time-lapse images
+summary: Quantify nuclear motion in 3D fluorescence time-lapses with OpticalFlow3D and compare conditions with motion profiles.
+description: |-
+  OpticalFlow3D Profiler runs the original OpticalFlow3D algorithm (Janelia, BSD-3-Clause) on 3D nuclear time-lapses, extracts motion features per field of view (speed, velocity components, directional coherence, spatial heterogeneity, reliability QC) and compares experimental conditions with PCA and biological-repeat-level statistics.
+
+  Every run records its inputs, calibration, parameters and software versions. Speeds are relative optical-flow speeds of intensity patterns, not tracked nuclear displacements.
 kind: analysis
 hosts:
 - notebook
 distribution:
   installer: true
+  platforms: [linux-x86_64]
+status: Experimental
+license: BSD-3-Clause
+inputs:
+  - 3D time-lapse TIFF or OME-TIFF, one field of view per file (TZYX, optional C)
+  - Experimental metadata CSV (conditions, biological and technical repeats)
+  - Optional binary or label nuclear masks
+outputs:
+  - Upstream-format velocity and reliability volumes with provenance
+  - Per-frame and per-FOV motion feature tables with a feature dictionary
+  - PCA scores, loadings, condition comparisons and figures
+limitations:
+  - Speeds carry a size-dependent gain bias of the 3D algorithm (see docs/validation.md)
+  - Axial (Z) measurements are experimental for shallow Z-stacks
+  - About 11-12 GB of RAM per 1840 x 1840 x 11 stack; no tiling or GPU
+  - Installer validated on Linux x86-64 only
+quickstart:
+  - Install the app and open the OpticalFlow3D Profiler notebook from the Welcome page.
+  - Load one image, confirm its axes, channel and calibration.
+  - Calculate optical flow and inspect the velocity field.
+  - Extract features with a foreground and a reliability threshold.
+  - Compare conditions and export the results.
+categories: [optical flow, nuclei, cell migration, 3D time-lapse, motion]
+homepage: https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D

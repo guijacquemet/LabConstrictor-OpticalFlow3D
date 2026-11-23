@@ -1,0 +1,13 @@
+dependencies:
+  - numpy==2.2.6
+  - scipy==1.15.3
+  - tifffile==2025.5.10
+  - pandas==2.2.3
+  - scikit-learn==1.6.1
+  - matplotlib==3.10.3
+  - ipywidgets==8.1.7
+  - natsort==8.4.0
+  - pyyaml==6.0.2
+  - requests==2.32.3
+description: Quantify nuclear motion in 3D fluorescence time-lapses with OpticalFlow3D, extract motion profiles per field of view and compare conditions with PCA.
+python_version: 3.11.13
