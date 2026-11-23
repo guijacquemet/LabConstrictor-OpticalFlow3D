@@ -25,10 +25,13 @@ _SERVERS: dict[Path, int] = {}
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
-    """Serve the report's files only: no directory listing, nothing outside the folder (a
-    symbolic link out of it included), no request log in the notebook."""
+    """Serve the report's files only.
 
-    def send_head(self):  # noqa: ANN201 (stdlib signature)
+    No directory listing, nothing outside the folder (a symbolic link out of it included)
+    and no request log in the notebook.
+    """
+
+    def send_head(self) -> object:  # the stdlib returns a file object or None
         """Refuse any path that resolves outside the served folder."""
         root = Path(self.directory).resolve()
         if not Path(self.translate_path(self.path)).resolve().is_relative_to(root):

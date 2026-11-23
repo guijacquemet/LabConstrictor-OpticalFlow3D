@@ -16,7 +16,7 @@ import pandas as pd
 
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
-from .naming import SEPARATOR, feature_key
+from .naming import feature_key
 from .validation import InputError
 
 

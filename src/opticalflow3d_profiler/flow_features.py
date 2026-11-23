@@ -10,7 +10,6 @@ computed is ``NaN`` and its reason is returned alongside.
 from __future__ import annotations
 
 import functools
-
 from dataclasses import dataclass
 
 import numpy as np
@@ -264,9 +263,7 @@ def _kernel_entropy(resolution_bins: int) -> float:
 
 def _grid_mass(theta: np.ndarray) -> np.ndarray:
     """Return the share of directions at each grid point (linear spreading, sum 1)."""
-    position = np.mod(np.asarray(theta, dtype=np.float64), 2 * np.pi) * (
-        ENTROPY_GRID / (2 * np.pi)
-    )
+    position = np.mod(np.asarray(theta, dtype=np.float64), 2 * np.pi) * (ENTROPY_GRID / (2 * np.pi))
     low = np.floor(position)
     upper = position - low
     low = low.astype(np.int64) % ENTROPY_GRID

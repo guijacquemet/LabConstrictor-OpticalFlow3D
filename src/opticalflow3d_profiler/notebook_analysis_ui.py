@@ -117,8 +117,10 @@ class ResultsStep:
         display(replicate_counts(features.table))
         merged = shared_repeats(features.table) if self.shared.value else {}
         for label, runs in merged.items():
-            print(f"⚠️ Repeat {label} of runs {', '.join(runs)} is counted as ONE biological "
-                  "repeat (labels shared); untick the box if they are different repeats.")
+            print(
+                f"⚠️ Repeat {label} of runs {', '.join(runs)} is counted as ONE biological "
+                "repeat (labels shared); untick the box if they are different repeats."
+            )
         print(f"{len(features.table)} fields of view from {len(features.sources)} run(s).")
 
 

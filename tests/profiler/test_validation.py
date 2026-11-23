@@ -94,5 +94,5 @@ def test_sigmas_must_be_positive_so_a_window_has_three_frames():
     huge = FlowParameters(t_sig=1e308)  # finite and positive, but 6 * tSig overflows
     assert codes(check_time_and_depth(15, 11, huge)) == {"too_few_frames"}
     with pytest.raises(ValueError, match="too large"):
-        huge.window_length
+        _ = huge.window_length
     assert codes(check_time_and_depth(15, 11, FlowParameters(t_sig=0.1))) == set()

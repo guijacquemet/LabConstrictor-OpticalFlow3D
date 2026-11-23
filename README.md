@@ -82,7 +82,9 @@ processing (measured on a 4-vCPU machine), and 9.4 GB of float64 output per fiel
 ## Run folder
 
 ```
-<run>/run_manifest.json   inputs, calibration, settings, versions, per-FOV status
+<run>/run_started.json    the run's claim: a folder holds one run, never entered again
+<run>/run_manifest.json   inputs, calibration, settings, versions, profiler source hash,
+                          per-FOV status
 <run>/experiments.csv     validated metadata with fov_uid
 <run>/fovs.csv            status of every field of view (failures included)
 <run>/flow/<fov_uid>/     <fov_uid>_{vx,vy,vz,rel}_tNNNN.tiff + flow_manifest.json

@@ -224,8 +224,7 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
             Issue(
                 "error",
                 "too_few_frames",
-                f"The movie has {n_t} time points; tSig={params.t_sig} needs at least "
-                f"{needed}.",
+                f"The movie has {n_t} time points; tSig={params.t_sig} needs at least {needed}.",
                 "Use a longer movie or a smaller tSig.",
             )
         )

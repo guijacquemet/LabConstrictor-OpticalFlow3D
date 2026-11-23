@@ -390,9 +390,7 @@ def run_flow(
     )
     try:
         try:
-            outputs = _compute_outputs(
-                spec, header, params, identity, partial, name, report, stage
-            )
+            outputs = _compute_outputs(spec, header, params, identity, partial, name, report, stage)
         finally:
             stage.close()
         manifest = _flow_manifest(name, identity, source, outputs, started)
