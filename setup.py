@@ -52,6 +52,6 @@ setup(
     project_urls={"Source": f"https://github.com/{REPOSITORY}"} if REPOSITORY else {},
     package_dir={"": "src"},
     packages=find_packages(where="src"),
-    python_requires=">=PYTHON_VERSION",
+    python_requires=">=3.11",
     install_requires=read_requirements(),
 )
