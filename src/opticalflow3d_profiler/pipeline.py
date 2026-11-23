@@ -410,6 +410,28 @@ def write_feature_tables(
     return per_fov
 
 
+def checked_settings(settings: RunSettings, flow_only: bool = False) -> RunSettings:
+    """Return the settings with the flow mode resolved, after every check that writes nothing.
+
+    Call it before creating a run folder, so that a refused setting never uses up a run name.
+
+    Raises
+    ------
+    InputError
+        For invalid feature or foreground settings, an invalid object-set name, or 3D speed
+        with per-slice 2D optical flow.
+    """
+    settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
+    if not flow_only:
+        raise_for_errors(check_feature_settings(settings.features, settings.foreground))
+        settings.column_names()
+        if settings.flow.mode == "xy_per_slice" and settings.features.speed_mode == "xyz":
+            raise InputError(
+                "3D speed needs 3D optical flow; with per-slice 2D flow choose XY speed."
+            )
+    return settings
+
+
 def run_experiment(
     metadata: pd.DataFrame,
     settings: RunSettings,
@@ -456,14 +478,7 @@ def run_experiment(
     InputError
         When the run folder already holds a run.
     """
-    settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
-    if not flow_only:
-        raise_for_errors(check_feature_settings(settings.features, settings.foreground))
-        settings.column_names()
-        if settings.flow.mode == "xy_per_slice" and settings.features.speed_mode == "xyz":
-            raise InputError(
-                "3D speed needs 3D optical flow; with per-slice 2D flow choose XY speed."
-            )
+    settings = checked_settings(settings, flow_only)
     claim_run(run_dir)  # after the settings checks, which write nothing
     handler = logging.FileHandler(run_dir / "logs" / "run.log", encoding="utf-8")
     LOG.addHandler(handler)

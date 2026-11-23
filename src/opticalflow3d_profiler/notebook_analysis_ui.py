@@ -33,7 +33,7 @@ from .notebook_ui import (
     guarded,
     text,
 )
-from .pipeline import run_experiment
+from .pipeline import checked_settings, run_experiment
 from .progress import TqdmTracker
 from .qc_export import export_qc_figures
 from .report_link import show_link
@@ -62,6 +62,7 @@ class ProcessStep:
         if session.metadata is None:
             raise InputError("Load the experiment in section 1 first.")
         settings = self.settings.run_settings()
+        checked_settings(settings)  # before the run folder: a refusal never uses up its name
         run = create_run(session.results_root, self.run_name.value.strip() or None)
         print(f"Run folder: {run}")
         manifest = run_experiment(

@@ -1,5 +1,7 @@
 # Phase 1 validation of the OpticalFlow3D engine
 
+[:arrow_left: Documentation index](index.md)
+
 Engine: unchanged `calc_flow.py` from aicjanelia/OpticalFlow3D at commit
 `6b88604a75319d80002de47ca993ce8b55fb9c46`, default parameters `xyzSig=3`, `tSig=1`,
 `wSig=4`. The tests that reproduce the findings are in `tests/profiler/test_flow_science.py`

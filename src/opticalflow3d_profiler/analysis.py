@@ -144,13 +144,18 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
             dictionary, reference = info, settings
         else:
             names = [d["name"] for d in dictionary["fov_features"]]
-            if info["units"] != dictionary["units"] or names != [
-                d["name"] for d in info["fov_features"]
-            ]:
+            other = [d["name"] for d in info["fov_features"]]
+            if info["units"] != dictionary["units"]:
                 raise InputError(
-                    f"{run} uses different units or features ({info['units']}) "
-                    f"from {runs[0]} ({dictionary['units']}); runs cannot be "
-                    "combined."
+                    f"{run} uses other units ({info['units']}) than {runs[0]} "
+                    f"({dictionary['units']}); runs cannot be combined."
+                )
+            if names != other:
+                only = sorted(set(names) ^ set(other))[:6]
+                raise InputError(
+                    f"{run} has other feature columns than {runs[0]} (for example "
+                    f"{', '.join(only) or 'the same names in another order'}): another "
+                    "speed mode or object-set name; runs cannot be combined."
                 )
             changed = _differences(reference, settings)
             if changed:
