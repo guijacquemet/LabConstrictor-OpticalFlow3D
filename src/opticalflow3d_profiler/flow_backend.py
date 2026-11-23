@@ -281,7 +281,7 @@ def flow_window(window: np.ndarray, params: FlowParameters) -> tuple[dict, dict[
         "equalisation_factors": None,
     }
     if params.brightness_equalisation == "global_mean":
-        window, record["equalisation_factors"] = equalise_window(window, means)
+        window, record["equalisation_factors"] = equalise_window(window)
     elif params.brightness_equalisation == "histogram_match":
         window = match_histograms_window(window)
         record["histogram_matched_to_frame"] = len(means) // 2

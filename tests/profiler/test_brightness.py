@@ -30,12 +30,14 @@ def test_brightness_change_of_a_known_ramp():
 
 def test_equalisation_matches_the_central_frame_and_keeps_the_input():
     window = np.stack([np.full((2, 3, 3), v, np.uint16) for v in (50, 100, 200)])
-    scaled, factors = equalise_window(window, window_means(window))
+    scaled, factors = equalise_window(window)
     assert factors == pytest.approx([2.0, 1.0, 0.5])
     assert np.allclose(window_means(scaled), 100.0)
     assert window[0, 0, 0, 0] == 50  # input untouched
-    with pytest.raises(ValueError, match="non-positive"):
-        equalise_window(window, np.array([0.0, 1.0, 1.0]))
+    dark = window.copy()
+    dark[0] = 0
+    with pytest.raises(ValueError, match="not above 0"):
+        equalise_window(dark)
 
 
 def test_brightness_ramp_is_read_as_motion_unless_equalised():
@@ -66,7 +68,7 @@ def test_equalised_run_is_upstream_on_the_scaled_window_and_changes_identity(tmp
     params = FlowParameters(mode="xyz", brightness_equalisation="global_mean")
     manifest = run_flow(spec, header, params, tmp_path / "flow", "f")
     output = manifest["outputs"][0]
-    scaled, _ = equalise_window(data, window_means(data))
+    scaled, _ = equalise_window(data)
     expected = calc_flow3D(scaled, 3, 1, 4)[0]
     saved = tifffile.imread(tmp_path / "flow" / output["files"]["vx"]["name"])
     np.testing.assert_array_equal(saved, expected)
