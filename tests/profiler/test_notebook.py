@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 
 from opticalflow3d_profiler.notebook_analysis_ui import build  # noqa: E402
 from opticalflow3d_profiler.synthetic import SyntheticMovie, render  # noqa: E402
+from opticalflow3d_profiler.validation import InputError  # noqa: E402
 
 NOTEBOOK = (
     Path(__file__).resolve().parents[2]
@@ -84,6 +85,10 @@ def test_all_steps_drive_end_to_end(tmp_path):
     settings.threshold.value = "300"
     settings.rel_value.value = "0.001"
     settings.region.value = 24
+    settings.tsig.value = 1e308  # re-validation M8: OverflowError escaped the guarded display
+    with pytest.raises(InputError, match="too_few_frames|needs at least more"):
+        settings.estimate()
+    settings.tsig.value = 1.0
     settings.estimate()
     settings.process_example()
     assert list((tmp_path / "results" / "examples").glob("*/features/features_per_fov.csv"))

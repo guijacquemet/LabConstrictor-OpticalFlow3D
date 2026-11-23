@@ -218,13 +218,13 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
             )
         ]
     issues: list[Issue] = []
-    if n_t < params.window_length:
+    if not 6 * params.t_sig + 1 <= n_t or n_t < params.window_length:  # no overflow first
+        needed = params.window_length if math.isfinite(6 * params.t_sig) else "more"
         issues.append(
             Issue(
                 "error",
                 "too_few_frames",
-                f"The movie has {n_t} time points; tSig={params.t_sig} needs at least "
-                f"{params.window_length}.",
+                f"The movie has {n_t} time points; tSig={params.t_sig} needs at least {needed}.",
                 "Use a longer movie or a smaller tSig.",
             )
         )

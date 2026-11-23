@@ -6,6 +6,7 @@ units and speed mode, so that a column means the same thing in every row.
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ import pandas as pd
 
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
-from .naming import SEPARATOR, feature_key
+from .naming import feature_key
 from .validation import InputError
 
 
@@ -64,28 +65,40 @@ def _differences(first: dict[str, object], other: dict[str, object]) -> list[str
 
 
 def run_labels(runs: list[Path]) -> dict[Path, str]:
-    """Return a label per run: its folder name, made unique with a hash of its full path.
+    """Return a label per run: its folder name and a hash of its resolved full path.
 
-    Two runs with the same folder name in different places (``/batchA/run-1`` and
-    ``/batchB/run-1``) get different labels, so their repeats are never merged by accident.
+    Every label carries the hash, not only colliding ones, so one run's label can never equal
+    another run's folder name (``run-1`` and a folder named ``run-1-954d642f``: re-validation
+    R4), and the same run gets the same label whatever other runs are loaded. The labels are
+    checked to be unique.
+
+    Raises
+    ------
+    InputError
+        When two runs get one label (the same folder listed twice).
     """
-    names = [r.name for r in runs]
-    labels = {}
-    for run in runs:
-        if names.count(run.name) == 1:
-            labels[run] = run.name
-        else:
-            digest = hashlib.sha256(str(run.resolve()).encode("utf-8")).hexdigest()[:8]
-            labels[run] = f"{run.name}-{digest}"
+    labels = {
+        run: f"{run.name}-{hashlib.sha256(str(run.resolve()).encode('utf-8')).hexdigest()[:16]}"
+        for run in runs
+    }
+    seen: dict[str, Path] = {}
+    for run, label in labels.items():
+        if label in seen:
+            raise InputError(f"{seen[label]} and {run} are the same run folder; load it once.")
+        seen[label] = run
     return labels
 
 
 def _read_table(run: Path, label: str) -> pd.DataFrame:
-    """Read one run's per-FOV table with metadata as text."""
+    """Read one run's per-FOV table with metadata as text (duplicate headers refused)."""
+    path = run / "features" / "features_per_fov.csv"
+    with path.open(newline="", encoding="utf-8") as handle:
+        header = next(csv.reader(handle), [])
+    twice = sorted({c for c in header if header.count(c) > 1})
+    if twice:
+        raise InputError(f"{path} has repeated column names: {', '.join(twice)}.")
     text = {c: str for c in METADATA_COLUMNS}
-    table = pd.read_csv(
-        run / "features" / "features_per_fov.csv", dtype=text, keep_default_na=False, na_values=[""]
-    )
+    table = pd.read_csv(path, dtype=text, keep_default_na=False, na_values=[""])
     table.insert(1, "run", label)
     return table
 
@@ -148,7 +161,7 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
                 )
         tables.append(_read_table(run, labels[run]))
     combined = pd.concat(tables, ignore_index=True)
-    keys = [feature_key(c) for c in combined.columns if SEPARATOR in c]
+    keys = [feature_key(c) for c in combined.columns]
     repeated = sorted({k for k in keys if keys.count(k) > 1})
     if repeated:
         raise InputError(

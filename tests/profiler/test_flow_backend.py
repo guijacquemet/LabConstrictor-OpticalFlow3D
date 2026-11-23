@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -139,11 +140,20 @@ def test_correction_code_identity_invalidates_cached_corrected_flow(flow_run, mo
     before = flow_backend.flow_identity(spec, header, corrected, source)
     assert before["brightness_correction"]["time_series_sha256"]
     assert "brightness_correction" not in flow_backend.flow_identity(spec, header, plain, source)
-    monkeypatch.setattr(
-        flow_backend, "implementation_identity", lambda: {"version": "other", "commit": "x"}
-    )
-    after = flow_backend.flow_identity(spec, header, corrected, source)
-    assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
+    # Re-validation M2: a real change of the bytes of either module changes the identity.
+    import morphobricks_normalization.time_series as time_series
+    from opticalflow3d_profiler import brightness
+
+    original = Path.read_bytes
+    for edited in (time_series.__file__, brightness.__file__):
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                Path, "read_bytes",
+                lambda self, e=edited: original(self) + (b"#" if str(self) == e else b""),
+            )  # fmt: skip
+            after = flow_backend.flow_identity(spec, header, corrected, source)
+        assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
+    assert "commit" not in before["brightness_correction"]  # a wheel install has none
 
 
 def test_a_failing_window_closes_progress_and_removes_the_partial_folder(
@@ -192,3 +202,35 @@ def test_a_manifest_missing_a_planned_output_is_refused(flow_run):
     assert any("not the planned [3, 4, 5]" in p for p in verify_result(out))
     with pytest.raises(InputError):
         open_result(out)
+
+
+@pytest.mark.parametrize("where", ["tiff", "manifest", "publish"])
+def test_a_failure_up_to_publication_removes_only_the_partial_folder(
+    tmp_path, imagej_file, monkeypatch, where
+):
+    # Re-validation M7: a failure writing the manifest or in os.replace left the partial folder.
+    from opticalflow3d_profiler import flow_backend
+
+    def fail(*_args, **_kwargs):
+        raise OSError(f"{where} failed")
+
+    if where == "tiff":
+        monkeypatch.setattr(flow_backend.tifffile, "imwrite", fail)
+    elif where == "manifest":
+        original = Path.write_text
+        monkeypatch.setattr(
+            Path, "write_text",
+            lambda self, *a, **k: fail() if self.name == "flow_manifest.json"
+            else original(self, *a, **k),
+        )  # fmt: skip
+    else:
+        monkeypatch.setattr(flow_backend.os, "replace", fail)
+    path, _ = imagej_file
+    flow = tmp_path / "flow"
+    (flow / "other").mkdir(parents=True)
+    (flow / "other" / "keep.txt").write_text("unrelated")
+    with pytest.raises(OSError, match=f"{where} failed"):
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"),
+                 flow / "f", "f")  # fmt: skip
+    assert sorted(p.name for p in flow.iterdir()) == ["other"]
+    assert (flow / "other" / "keep.txt").read_text() == "unrelated"

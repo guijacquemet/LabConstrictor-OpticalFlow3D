@@ -95,6 +95,27 @@ def _completeness(manifest: dict[str, Any]) -> list[str]:
     return problems
 
 
+def identity_changes(recorded: object, expected: object, path: str = "") -> list[str]:
+    """Name every value that differs between two identities, as ``path: recorded → wanted``.
+
+    Nested values are compared key by key, so a changed ``parameters.w_sig`` is named
+    rather than ``parameters`` (re-validation M6); long values are not printed.
+    """
+    if isinstance(recorded, dict) and isinstance(expected, dict):
+        return [
+            change
+            for key in sorted(set(recorded) | set(expected), key=str)
+            for change in identity_changes(
+                recorded.get(key, "absent"), expected.get(key, "absent"),
+                f"{path}.{key}" if path else str(key),
+            )
+        ]  # fmt: skip
+    if recorded == expected:
+        return []
+    shown = [repr(v) if len(repr(v)) <= 40 else "(long value)" for v in (recorded, expected)]
+    return [f"{path or 'identity'}: {shown[0]} → {shown[1]}"]
+
+
 def verify_result(folder: Path, expected_identity: dict[str, Any] | None = None) -> list[str]:
     """List the reasons why a saved result cannot be trusted or reused.
 
@@ -122,12 +143,8 @@ def verify_result(folder: Path, expected_identity: dict[str, Any] | None = None)
     if manifest.get("identity_key") != identity_key(manifest.get("identity", {})):
         problems.append("The manifest identity does not match its key.")
     if expected_identity is not None and manifest.get("identity") != expected_identity:
-        changed = sorted(
-            k
-            for k in set(expected_identity) | set(manifest.get("identity", {}))
-            if expected_identity.get(k) != manifest["identity"].get(k)
-        )
-        problems.append(f"Different inputs or settings: {', '.join(changed)}.")
+        changed = identity_changes(manifest.get("identity", {}), expected_identity)
+        problems.append(f"Different inputs or settings: {'; '.join(changed)}.")
     problems += _completeness(manifest)
     for output in manifest.get("outputs", []):
         for info in output["files"].values():

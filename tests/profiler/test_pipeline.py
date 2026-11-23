@@ -131,7 +131,7 @@ def test_flow_with_other_parameters_is_recomputed_not_reused(experiment):
     status = manifest["fovs"][0]
     assert status["status"] == "complete"
     assert status["flow_origin"].startswith("computed (earlier flow in")
-    assert "parameters" in status["flow_origin"]
+    assert "parameters.w_sig: 4" in status["flow_origin"] and "→ 2" in status["flow_origin"]
     assert (new / "flow" / one["fov_uid"].iloc[0] / "flow_manifest.json").is_file()
     after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in old.iterdir()}
     assert before == after  # the earlier result is untouched
@@ -300,6 +300,38 @@ def test_runs_with_the_same_folder_name_are_never_paired(experiment, tmp_path):
         coverage_input(combined, Design("ctrl", SPEED, repeats_paired=True))
 
 
+def test_a_run_label_never_equals_another_runs_folder_name(tmp_path):
+    from opticalflow3d_profiler.analysis import run_labels
+
+    # Re-validation R4: seriesC/run-1-<hash> was given the label generated for seriesA/run-1.
+    first, second = tmp_path / "seriesA" / "run-1", tmp_path / "seriesB" / "run-1"
+    generated = run_labels([first, second])[first]
+    third = tmp_path / "seriesC" / generated
+    labels = run_labels([first, second, third])
+    assert len(set(labels.values())) == 3
+    assert labels[first] == generated == run_labels([first])[first]  # stable for one run
+    with pytest.raises(InputError, match="same run folder"):
+        run_labels([first, tmp_path / "seriesA" / "x" / ".." / "run-1"])
+
+
+def test_repeated_or_shadowed_feature_columns_are_refused(experiment, tmp_path):
+    _, _, run, _ = experiment
+    copy = _copy_run(run, tmp_path / "copy", "c-")
+    table = copy / "features" / "features_per_fov.csv"
+    text = table.read_text(encoding="utf-8").splitlines()
+    header = text[0].split(",")
+    qc = next(c for c in header if c.startswith("qc_"))
+    shadow = [",".join([*header, "Nuclei__" + qc])] + [r + "," + r.split(",")[header.index(qc)]
+                                                       for r in text[1:]]  # fmt: skip
+    table.write_text("\n".join(shadow) + "\n", encoding="utf-8")
+    with pytest.raises(InputError, match="share a feature key"):
+        load_runs([copy])
+    table.write_text("\n".join([",".join([*header, qc])] + [r + ",0" for r in text[1:]]) + "\n",
+                     encoding="utf-8")  # fmt: skip
+    with pytest.raises(InputError, match="repeated column names"):
+        load_runs([copy])
+
+
 def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
     import hashlib
 
@@ -320,6 +352,43 @@ def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
     }
 
 
+def test_an_interrupted_or_concurrent_run_is_never_entered_again(experiment, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from opticalflow3d_profiler.results import claim_run
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    interrupted = create_run(tmp_path, "interrupted")
+    claim_run(interrupted)  # a run that stopped before writing its manifest
+    (interrupted / "flow" / one["fov_uid"].iloc[0]).mkdir()  # and had published a flow
+    with pytest.raises(InputError, match="never run twice"):
+        run_experiment(one, settings(), interrupted)
+    assert not (interrupted / "run_manifest.json").exists()
+    race = create_run(tmp_path, "race")
+
+    def attempt(_):
+        try:
+            claim_run(race)
+            return True
+        except InputError:
+            return False
+
+    with ThreadPoolExecutor(8) as pool:
+        assert sum(pool.map(attempt, range(8))) == 1  # exactly one claim wins
+
+
+def test_the_manifest_identifies_the_profiler_source(experiment, tmp_path):
+    from opticalflow3d_profiler.results import implementation_identity
+
+    _, metadata, _, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    manifest = run_experiment(one, settings(), create_run(tmp_path, "ident"), flow_only=True)
+    identity = implementation_identity()
+    assert manifest["profiler"] == identity and len(identity["source_sha256"]) == 64
+    assert identity["modules"] > 20
+
+
 def test_default_readout_is_a_feature_with_values(experiment):
     from dataclasses import replace as replace_set
 
@@ -334,3 +403,48 @@ def test_default_readout_is_a_feature_with_values(experiment):
     axial = FeatureDef(speed_3d, "magnitude", "", "", "lateral", "fov", "", AXIAL, "")
     undefined = replace_set(features, table=table, fov_defs=[axial, *features.fov_defs])
     assert default_readout(undefined) == SPEED
+
+
+def test_the_report_server_serves_only_files_inside_its_folder(tmp_path):
+    # Re-validation E24: no listing, no '..', no symbolic link out of the folder.
+    import urllib.error
+    import urllib.request
+
+    from opticalflow3d_profiler.report_link import serve
+
+    folder = tmp_path / "report"
+    folder.mkdir()
+    (folder / "report.html").write_text("<p>ok</p>")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("outside")
+    (folder / "link.txt").symlink_to(secret)
+    port = serve(folder)
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # never a proxy
+
+    def status(path):
+        try:
+            with direct.open(f"http://127.0.0.1:{port}{path}") as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    assert status("/report.html") == 200
+    assert {status(p) for p in ("/", "/link.txt", "/../secret.txt", "/%2e%2e/secret.txt")} == {404}
+
+
+def test_an_undefined_brightness_change_gets_the_reason_its_record_supports():
+    from opticalflow3d_profiler.pipeline import brightness_reason
+
+    assert "older result" in brightness_reason({})
+    assert "cause is not recorded" in brightness_reason({"brightness_change_per_frame": None})
+    nan = brightness_reason({"brightness_change_per_frame": float("nan")})
+    assert "central frame" in nan
+
+
+def test_shared_repeat_labels_are_named_for_the_user():
+    from opticalflow3d_profiler.notebook_analysis_ui import shared_repeats
+
+    table = pd.DataFrame(
+        {"run": ["A", "B", "A", "B"], "biological_repeat": ["r1", "r1", "r2", "r3"]}
+    )
+    assert shared_repeats(table) == {"r1": ["A", "B"]}

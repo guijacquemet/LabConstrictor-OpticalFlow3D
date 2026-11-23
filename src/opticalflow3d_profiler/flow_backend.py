@@ -389,14 +389,30 @@ def run_flow(
         f"Optical flow {name}", len(identity["frame_map"]), nested=True
     )
     try:
-        outputs = _compute_outputs(spec, header, params, identity, partial, name, report, stage)
+        try:
+            outputs = _compute_outputs(spec, header, params, identity, partial, name, report, stage)
+        finally:
+            stage.close()
+        manifest = _flow_manifest(name, identity, source, outputs, started)
+        (partial / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        os.replace(partial, out_dir)  # published only complete, with its manifest
     except BaseException:
-        # Our own temporary folder: removed, so a later attempt starts clean.
+        # Our own temporary folder only (created above), on any failure up to publication:
+        # a later attempt starts clean, and an existing out_dir is never touched.
         shutil.rmtree(partial, ignore_errors=True)
         raise
-    finally:
-        stage.close()
-    manifest = {
+    return manifest
+
+
+def _flow_manifest(
+    name: str,
+    identity: dict[str, Any],
+    source: dict[str, object],
+    outputs: list[dict[str, Any]],
+    started: float,
+) -> dict[str, Any]:
+    """Return the flow manifest of a computed field of view."""
+    return {
         "kind": "opticalflow3d_profiler.flow",
         "format_version": 1,
         "name": name,
@@ -411,6 +427,3 @@ def run_flow(
         "numpy": np.__version__,
         "seconds": round(time.monotonic() - started, 3),
     }
-    (partial / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    os.replace(partial, out_dir)
-    return manifest

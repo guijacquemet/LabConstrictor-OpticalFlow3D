@@ -28,7 +28,15 @@ from .foreground import describe, threshold_frame
 from .image_io import ImageHeader, dimensions, file_identity, inspect_tiff, read_frames
 from .naming import ColumnNames
 from .progress import Tracker
-from .results import environment, now, relative, write_csv, write_json
+from .results import (
+    claim_run,
+    environment,
+    implementation_identity,
+    now,
+    relative,
+    write_csv,
+    write_json,
+)
 from .temporal_features import aggregate_fov, fov_dictionary
 from .validation import (
     InputError,
@@ -184,9 +192,7 @@ def frame_rows(
             features.put(
                 "qc_brightness_change_per_frame",
                 recorded.get("brightness_change_per_frame"),
-                "not recorded (optical flow from an older result)"
-                if "brightness_change_per_frame" not in recorded
-                else "undefined: the central frame's mean intensity is not above 0",
+                brightness_reason(recorded),
             )
             row: dict[str, object] = {
                 "fov_uid": result.name,
@@ -203,6 +209,15 @@ def frame_rows(
     finally:
         stage.close()
     return rows
+
+
+def brightness_reason(recorded: dict[str, object]) -> str:
+    """Return why an output's recorded brightness change has no value (m6)."""
+    if "brightness_change_per_frame" not in recorded:
+        return "not recorded (optical flow from an older result)"
+    if recorded["brightness_change_per_frame"] is None:
+        return "recorded without a value (null) in the flow manifest; the cause is not recorded"
+    return "undefined: the central frame's mean intensity is not above 0"
 
 
 def brightness_warning(result: FlowResult, equalised: bool) -> str:
@@ -406,8 +421,10 @@ def run_experiment(
 ) -> dict[str, object]:
     """Process every field of view of a validated metadata table into a run folder.
 
-    A run folder is used once: a second call on a folder that holds a ``run_manifest.json``
-    is refused, a flow-only run included, so no status or provenance file is ever replaced.
+    A run folder is used once: it is claimed atomically before anything is written
+    (:func:`~opticalflow3d_profiler.results.claim_run`), so a second call, a concurrent one or
+    one on an interrupted run is refused, a flow-only run included, and no status or
+    provenance file is ever replaced.
     To extract features from earlier optical flow, or with other settings, create a new run
     with ``reuse_from``.
 
@@ -439,11 +456,6 @@ def run_experiment(
     InputError
         When the run folder already holds a run.
     """
-    if (run_dir / "run_manifest.json").exists():
-        raise InputError(
-            f"{run_dir} already holds a run (run_manifest.json); a run is never run twice or "
-            "overwritten. Create a new run, with reuse_from to reuse its verified optical flow."
-        )
     settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
         raise_for_errors(check_feature_settings(settings.features, settings.foreground))
@@ -452,6 +464,7 @@ def run_experiment(
             raise InputError(
                 "3D speed needs 3D optical flow; with per-slice 2D flow choose XY speed."
             )
+    claim_run(run_dir)  # after the settings checks, which write nothing
     handler = logging.FileHandler(run_dir / "logs" / "run.log", encoding="utf-8")
     LOG.addHandler(handler)
     LOG.setLevel(logging.INFO)
@@ -485,6 +498,7 @@ def run_experiment(
         "started": started,
         "finished": now(),
         "environment": environment(),
+        "profiler": implementation_identity(),
         "upstream": upstream_identity(),
         "settings": record(settings),
         "calibration_issues": [i.message for i in check_calibration(settings.calibration)],

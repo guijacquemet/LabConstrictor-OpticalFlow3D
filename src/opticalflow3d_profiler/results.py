@@ -15,6 +15,7 @@ non-empty folder.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -106,18 +107,66 @@ def write_csv(path: Path, table: pd.DataFrame) -> None:
 
 
 def environment() -> dict[str, str]:
-    """Return the application, Python, platform and dependency versions."""
+    """Return the application, Python, platform and dependency versions (with git commits)."""
     versions = {
         "opticalflow3d_profiler": __version__,
         "python": sys.version.split()[0],
         "platform": platform.platform(),
     }
     for name in DEPENDENCIES:
-        try:
-            versions[name] = importlib_metadata.version(name)
-        except importlib_metadata.PackageNotFoundError:
-            versions[name] = "not installed"
+        found = distribution_identity(name)
+        versions[name] = found["version"] or "not installed"
+        if found["commit"]:  # a git install: the commit identifies the code exactly
+            versions[name] += f" (git {found['commit']})"
     return versions
+
+
+RUN_CLAIM = "run_started.json"
+
+
+def claim_run(run_dir: Path) -> None:
+    """Claim a run folder for one run, atomically, before anything is written in it.
+
+    ``run_started.json`` is created exclusively (``O_CREAT | O_EXCL``), so two processes
+    cannot both start a run in one folder, and a folder whose run was interrupted (claim but
+    no manifest) or finished is never entered again (re-validation C3).
+
+    Raises
+    ------
+    InputError
+        When the folder has been claimed or holds a run manifest.
+    """
+    claim = Path(run_dir) / RUN_CLAIM
+    try:
+        handle = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        handle = None
+    if handle is None or (Path(run_dir) / "run_manifest.json").exists():
+        if handle is not None:
+            os.close(handle)
+        raise InputError(
+            f"{run_dir} already holds a run, finished, running or interrupted ({RUN_CLAIM} or "
+            "run_manifest.json); a run is never run twice or overwritten. Create a new run, "
+            "with reuse_from to reuse its verified optical flow."
+        )
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        json.dump({"started": now(), "pid": os.getpid(), "host": platform.node()}, out)
+
+
+def implementation_identity() -> dict[str, object]:
+    """Return the profiler version and a SHA-256 of every one of its Python modules.
+
+    Recorded in every run manifest so that two numerical implementations never share an
+    identity, even without a version bump (re-validation): ``source_sha256`` covers the
+    modules' paths and bytes in sorted order.
+    """
+    package = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    files = sorted(p for p in package.rglob("*.py") if "__pycache__" not in p.parts)
+    for path in files:
+        digest.update(path.relative_to(package).as_posix().encode("utf-8") + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return {"version": __version__, "modules": len(files), "source_sha256": digest.hexdigest()}
 
 
 def now() -> str:

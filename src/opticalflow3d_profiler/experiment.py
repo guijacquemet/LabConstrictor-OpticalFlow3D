@@ -71,8 +71,8 @@ def validate_metadata(table: pd.DataFrame) -> pd.DataFrame:
             if isinstance(value, str) and value.strip():
                 check_identity_text(value, column, "metadata table")
     for column in REQUIRED_COLUMNS:
-        table[column] = table[column].astype("string").str.strip()
-        empty = table[column].isna() | (table[column] == "")
+        table[column] = table[column].astype("string")  # literal: never trimmed (m1)
+        empty = table[column].isna() | (table[column].str.strip() == "")
         if empty.any():
             rows = ", ".join(str(i + 2) for i in table.index[empty])
             raise InputError(f"Column '{column}' is empty in line(s) {rows} of the table.")

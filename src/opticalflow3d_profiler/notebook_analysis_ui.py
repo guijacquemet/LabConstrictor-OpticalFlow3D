@@ -99,7 +99,13 @@ class ResultsStep:
         """Return the section's widget tree."""
         load = button("Load the results")
         load.on_click(guarded(self.output, self.load))
-        return widgets.VBox([self.runs, self.shared, load, self.output])
+        explain = widgets.HTML(
+            "<small>Tick only when runs share their repeats (for example control and "
+            "treatment of one experiment day processed as separate runs): the same label "
+            "in several runs then counts as one biological repeat. The software cannot "
+            "check this. Unticked, each run's repeats are its own.</small>"
+        )
+        return widgets.VBox([self.runs, self.shared, explain, load, self.output])
 
     def load(self) -> None:
         """Load and combine the per-FOV tables; show the design they hold."""
@@ -109,7 +115,19 @@ class ResultsStep:
         features = load_runs(listed or [self.session.run_dir], self.shared.value)
         self.session.analysis = {"features": features}
         display(replicate_counts(features.table))
+        merged = shared_repeats(features.table) if self.shared.value else {}
+        for label, runs in merged.items():
+            print(
+                f"⚠️ Repeat {label} of runs {', '.join(runs)} is counted as ONE biological "
+                "repeat (labels shared); untick the box if they are different repeats."
+            )
         print(f"{len(features.table)} fields of view from {len(features.sources)} run(s).")
+
+
+def shared_repeats(table: pd.DataFrame) -> dict[str, list[str]]:
+    """Return each biological-repeat label found in several runs, with those runs."""
+    runs = table.groupby("biological_repeat")["run"].unique()
+    return {str(k): sorted(map(str, v)) for k, v in runs.items() if len(v) > 1}
 
 
 class DesignStep:

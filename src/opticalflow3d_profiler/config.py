@@ -102,7 +102,10 @@ class FlowParameters:
         Upstream ``process_flow`` uses ``6*tSig + 1`` frames, made odd; the central frame
         is the analysed one.
         """
-        length = math.ceil(6 * self.t_sig) + 1
+        span = 6 * self.t_sig
+        if not math.isfinite(span):  # 1e308 overflows: a named error, never OverflowError
+            raise ValueError(f"tSig={self.t_sig} is too large: its time window has no length.")
+        length = math.ceil(span) + 1
         return length if length % 2 else length + 1
 
     @property
@@ -175,7 +178,8 @@ class FeatureSettings:
         Speed (in feature units) above which a region counts as moving; ``None`` leaves
         the fraction of moving regions undefined.
     angle_bins
-        Number of bins of the XY angular entropy.
+        Angular resolution of the XY angular entropy: its kernel's standard deviation is
+        ``360° / angle_bins`` (10° by default).
     aligned_angle_deg
         Vectors within this angle of the dominant direction count as aligned.
     min_direction_speed

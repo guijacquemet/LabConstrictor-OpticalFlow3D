@@ -85,3 +85,11 @@ def test_intensity_columns_are_opt_in_in_the_dictionary():
 def test_metadata_identity_whitespace_is_refused_not_trimmed():
     with pytest.raises(InputError, match="invalid_name"):
         validate_metadata(pd.DataFrame([metadata(condition="ctrl ")]))
+
+
+def test_image_paths_are_kept_literally():
+    # Re-validation m1: an image path is never trimmed (a file name may end with a space).
+    table = validate_metadata(pd.DataFrame([metadata(image_path=" /data/a.tif ")]))
+    assert table["image_path"].iloc[0] == " /data/a.tif "
+    with pytest.raises(InputError, match="empty"):
+        validate_metadata(pd.DataFrame([metadata(image_path="  ")]))
