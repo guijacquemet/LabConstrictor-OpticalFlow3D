@@ -194,9 +194,29 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
     Returns
     -------
     list of Issue
-        An error when fewer than ``window_length`` frames exist or Z has one slice; a
-        warning when the Z stack is shorter than the spatial smoothing kernel.
+        An error for a sigma that is not a positive finite number, when fewer than
+        ``window_length`` frames exist or Z has one slice; a warning when the Z stack is
+        shorter than the spatial smoothing kernel.
     """
+    bad = [
+        f"{name}={value}"
+        for name, value in (
+            ("xyzSig", params.xyz_sig),
+            ("tSig", params.t_sig),
+            ("wSig", params.w_sig),
+        )
+        if not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
+    ]
+    if bad:
+        return [
+            Issue(
+                "error",
+                "invalid_sigma",
+                f"The optical-flow parameters must be positive numbers ({', '.join(bad)}); a "
+                "time window then always has at least 3 frames.",
+                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or other positive values.",
+            )
+        ]
     issues: list[Issue] = []
     if n_t < params.window_length:
         issues.append(

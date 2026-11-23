@@ -81,3 +81,13 @@ def test_missing_calibration_is_reported_not_guessed():
     assert found == {"calibration_lateral_missing", "calibration_z_missing"}
     assert not Calibration().lateral_known
     assert Calibration(0.5, 0.5, 2.0, 1.0).complete
+
+
+def test_sigmas_must_be_positive_so_a_window_has_three_frames():
+    for bad in (
+        FlowParameters(t_sig=0),
+        FlowParameters(xyz_sig=-1),
+        FlowParameters(w_sig=float("nan")),
+    ):
+        assert codes(check_time_and_depth(15, 11, bad)) == {"invalid_sigma"}
+    assert FlowParameters(t_sig=0.1).window_length >= 3
