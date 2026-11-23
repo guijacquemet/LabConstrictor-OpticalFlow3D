@@ -24,5 +24,7 @@ jobs:
           python-version: '3.11'
       - name: Install the application dependencies and the check tools
         run: pip install -r tools/requirements-checks.txt
+      - name: Register the Jupyter kernel used by the notebook test
+        run: python -m ipykernel install --user --name python3
       - name: Ruff, code rules and tests
         run: python tools/check_profiler.py

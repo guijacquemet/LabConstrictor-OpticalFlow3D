@@ -186,7 +186,11 @@ def _foreground_reader(spec: ForegroundSpec, dims: dict[str, int]) -> tuple[Call
 
 
 def process_fov(
-    row: dict[str, str], settings: RunSettings, run_dir: Path, reuse_from: Path | None = None
+    row: dict[str, str],
+    settings: RunSettings,
+    run_dir: Path,
+    reuse_from: Path | None = None,
+    flow_only: bool = False,
 ) -> FovOutcome:
     """Run optical flow and feature extraction for one metadata row.
 
@@ -200,11 +204,13 @@ def process_fov(
         Current run folder.
     reuse_from
         Earlier run folder for verified flow reuse.
+    flow_only
+        Stop after the optical flow (status ``flow complete``).
 
     Returns
     -------
     FovOutcome
-        ``status`` is ``complete`` or ``failed`` (with the message).
+        ``status`` is ``complete``, ``flow complete`` or ``failed`` (with the message).
     """
     uid = row["fov_uid"]
     status: dict[str, object] = {
@@ -222,6 +228,14 @@ def process_fov(
         header = inspect_tiff(spec.path)
         warnings = calibration_warnings(header, settings.calibration)
         result, origin = obtain_flow(spec, header, settings, run_dir, uid, reuse_from)
+        if flow_only:
+            status.update(
+                status="flow complete",
+                flow_origin=origin,
+                n_flow_frames=len(result.frames),
+                warnings=" | ".join(warnings),
+            )
+            return FovOutcome(status)
         dims = dimensions(spec, header)
         fg_spec = settings.foreground
         if row.get("mask_path"):
@@ -306,8 +320,13 @@ def run_experiment(
     run_dir: Path,
     reuse_from: Path | None = None,
     progress: Callable[[str], None] | None = None,
+    flow_only: bool = False,
 ) -> dict[str, object]:
     """Process every field of view of a validated metadata table into a run folder.
+
+    Run it once with ``flow_only=True`` and again with ``reuse_from=run_dir`` to calculate
+    the optical flow and the features in two steps; features are extracted only once per
+    run (use a new run with ``reuse_from`` for other feature settings).
 
     Parameters
     ----------
@@ -321,12 +340,24 @@ def run_experiment(
         Earlier run folder whose verified optical flow may be reused.
     progress
         Optional callback for one line per field of view.
+    flow_only
+        Calculate and verify the optical flow only.
 
     Returns
     -------
     dict
         The run manifest that was written.
+
+    Raises
+    ------
+    InputError
+        When the run already holds feature tables.
     """
+    if (run_dir / "features" / "features_per_fov.csv").exists():
+        raise InputError(
+            f"{run_dir} already holds features; create a new run that reuses "
+            "its optical flow to extract features with other settings."
+        )
     handler = logging.FileHandler(run_dir / "logs" / "run.log", encoding="utf-8")
     LOG.addHandler(handler)
     LOG.setLevel(logging.INFO)
@@ -335,7 +366,7 @@ def run_experiment(
     try:
         for row in metadata.to_dict("records"):
             (progress or LOG.info)(f"Processing {row['fov_uid']}...")
-            outcomes.append(process_fov(row, settings, run_dir, reuse_from))
+            outcomes.append(process_fov(row, settings, run_dir, reuse_from, flow_only))
             (progress or LOG.info)(f"{row['fov_uid']}: {outcomes[-1].status['status']}")
     finally:
         LOG.removeHandler(handler)
@@ -352,6 +383,7 @@ def run_experiment(
     manifest = {
         "kind": "opticalflow3d_profiler.run",
         "format_version": 1,
+        "stage": "optical flow" if flow_only else "optical flow and features",
         "started": started,
         "finished": now(),
         "environment": environment(),

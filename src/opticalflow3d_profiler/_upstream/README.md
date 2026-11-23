@@ -7,6 +7,8 @@
 
 - SHA-256 of `calc_flow.py`: `e40c6cfff644f2ae57a244e2ef1aa7c2a8e27cc7d361534182cdf1cb49338a05`.
   `opticalflow3d_profiler.flow_backend` refuses to run if the file differs.
+- `_license.py` holds the licence text as a Python constant, because the LabConstrictor
+  installer bundles only the `.py` files of `src/`.
 - Modifications: none. The file is excluded from this project's Ruff and code-rule checks.
 - Only `calc_flow3D` and `calc_flow2D` are called. `process_flow` is not used: it reads
   images by file-name pattern, guesses ImageJ metadata and calls `sys.exit` on errors; the

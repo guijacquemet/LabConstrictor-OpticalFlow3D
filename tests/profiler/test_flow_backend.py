@@ -130,3 +130,13 @@ def test_upstream_process_flow_folder_can_be_opened(tmp_path):
     (folder / "exp_rel_t0004.tiff").unlink()
     with pytest.raises(InputError, match="incomplete"):
         open_upstream_result(folder, "exp")
+
+
+def test_upstream_licence_ships_with_the_python_files():
+    from pathlib import Path
+
+    from opticalflow3d_profiler._upstream import _license
+
+    folder = Path(_license.__file__).parent
+    assert (folder / "LICENSE").read_text() == _license.LICENSE_TEXT
+    assert "Howard Hughes Medical Institute" in _license.LICENSE_TEXT

@@ -188,3 +188,30 @@ def test_mask_foreground_must_match_image(experiment, tmp_path):
     fg = ForegroundSpec(mode="mask", mask_path=mask, mask_axes="ZYX")
     manifest = run_experiment(metadata.iloc[:1], settings(foreground=fg), run)
     assert "source image coordinates" in manifest["fovs"][0]["message"]
+
+
+def test_features_from_a_real_upstream_process_flow_folder(tmp_path):
+    from opticalflow3d_profiler._upstream.calc_flow import process_flow
+    from opticalflow3d_profiler.external import external_features
+
+    movie = SyntheticMovie(shape=(8, 11, 40, 40), n_nuclei=4, velocity=(0, 0, 0.5))
+    tifffile.imwrite(tmp_path / "exp.tif", render(movie), imagej=True, metadata={"axes": "TZYX"})
+    process_flow(str(tmp_path), "exp", "OneTif", 3)
+    folder = tmp_path / "OpticalFlow3D" / "exp"
+    row = {
+        "sample_id": "s",
+        "position_id": "p",
+        "condition": "c",
+        "biological_repeat": "r",
+        "technical_repeat": "t",
+        "batch": "b",
+        "input_path": "exp.tif",
+    }
+    run = create_run(tmp_path, "ext")
+    manifest = external_features(folder, "exp", row, settings(foreground=ForegroundSpec()), run)
+    frames = pd.read_csv(run / "features" / "features_per_frame.csv")
+    assert sorted(frames["source_frame"]) == [3, 4]
+    assert manifest["fovs"][0]["flow_origin"].startswith("external, not verified")
+    assert frames["qc_foreground_intensity_mean"].isna().all()
+    with pytest.raises(InputError, match="needs the original image"):
+        external_features(folder, "exp", row, settings(), create_run(tmp_path, "ext2"))
