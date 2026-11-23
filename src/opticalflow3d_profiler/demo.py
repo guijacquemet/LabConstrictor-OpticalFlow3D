@@ -27,7 +27,7 @@ import tifffile
 
 from . import figures
 from .analysis import analyse, compare_conditions, export_analysis, load_runs
-from .config import Calibration, FeatureSettings, ForegroundSpec, to_record
+from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, to_record
 from .experiment import read_metadata
 from .flow_store import open_result
 from .pipeline import RunSettings, run_experiment
@@ -58,54 +58,54 @@ class DemoDesign:
     intensity_threshold: float = 300.0
 
 
+def _write_fov(
+    folder: Path, design: DemoDesign, condition: str, rep: int, fov: int, seed: int
+) -> dict[str, str]:
+    """Write one synthetic image and its ground-truth mask; return its metadata row."""
+    speed, spread = CONDITIONS[condition]
+    movie = SyntheticMovie(
+        design.shape,
+        design.n_nuclei,
+        (0.0, 0.0, speed),
+        spread,
+        design.sigma_xy,
+        design.sigma_z,
+        noise_sd=design.noise_sd,
+        seed=seed,
+    )
+    name = f"{condition}_rep{rep}_fov{fov}"
+    image, mask = folder / "images" / f"{name}.tif", folder / "masks" / f"{name}_mask.tif"
+    for path in (image, mask):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    tifffile.imwrite(image, render(movie), imagej=True, metadata={"axes": "TZYX"})
+    truth = render(replace(movie, noise_sd=0.0), dtype="float64")
+    inside = truth > movie.background + 0.3 * movie.amplitude
+    tifffile.imwrite(mask, inside.astype(np.uint8), imagej=True, metadata={"axes": "TZYX"})
+    return {
+        "sample_id": name,
+        "position_id": f"pos{fov}",
+        "condition": condition,
+        "biological_repeat": f"rep{rep}",
+        "technical_repeat": "t1",
+        "batch": f"day{rep}",
+        "input_path": f"images/{name}.tif",
+        "mask_path": f"masks/{name}_mask.tif",
+    }
+
+
 def write_experiment(folder: Path, design: DemoDesign) -> Path:
-    """Write the synthetic images, ground-truth masks and metadata CSV.
+    """Write the synthetic images, ground-truth masks, metadata CSV and ground truth.
 
     Returns
     -------
     pathlib.Path
         The metadata CSV.
     """
-    rows, seed = [], 0
-    for condition, (speed, spread) in CONDITIONS.items():
+    rows = []
+    for condition in CONDITIONS:
         for rep in range(1, design.repeats + 1):
             for fov in range(1, design.fovs_per_repeat + 1):
-                seed += 1
-                movie = SyntheticMovie(
-                    design.shape,
-                    design.n_nuclei,
-                    (0.0, 0.0, speed),
-                    spread,
-                    design.sigma_xy,
-                    design.sigma_z,
-                    noise_sd=design.noise_sd,
-                    seed=seed,
-                )
-                name = f"{condition}_rep{rep}_fov{fov}"
-                image = folder / "images" / f"{name}.tif"
-                mask = folder / "masks" / f"{name}_mask.tif"
-                for path in (image, mask):
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                tifffile.imwrite(image, render(movie), imagej=True, metadata={"axes": "TZYX"})
-                truth = render(replace(movie, noise_sd=0.0), dtype="float64")
-                tifffile.imwrite(
-                    mask,
-                    (truth > movie.background + 0.3 * movie.amplitude).astype(np.uint8),
-                    imagej=True,
-                    metadata={"axes": "TZYX"},
-                )
-                rows.append(
-                    {
-                        "sample_id": name,
-                        "position_id": f"pos{fov}",
-                        "condition": condition,
-                        "biological_repeat": f"rep{rep}",
-                        "technical_repeat": "t1",
-                        "batch": f"day{rep}",
-                        "input_path": f"images/{name}.tif",
-                        "mask_path": f"masks/{name}_mask.tif",
-                    }
-                )
+                rows.append(_write_fov(folder, design, condition, rep, fov, len(rows) + 1))
     rows.append(
         {
             **rows[0],
@@ -117,19 +117,14 @@ def write_experiment(folder: Path, design: DemoDesign) -> Path:
     )
     path = folder / "metadata.csv"
     pd.DataFrame(rows).to_csv(path, index=False)
-    (folder / "ground_truth.json").write_text(
-        json.dumps(
-            {
-                "conditions": {
-                    c: {"xy_speed_px_per_frame": s, "direction_spread_deg": d, "direction_deg": 0.0}
-                    for c, (s, d) in CONDITIONS.items()
-                },
-                "design": to_record(design),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    truth = {
+        "conditions": {
+            c: {"xy_speed_px_per_frame": s, "direction_spread_deg": d, "direction_deg": 0.0}
+            for c, (s, d) in CONDITIONS.items()
+        },
+        "design": to_record(design),
+    }
+    (folder / "ground_truth.json").write_text(json.dumps(truth, indent=2), encoding="utf-8")
     return path
 
 
@@ -162,8 +157,8 @@ def _condition_means(table: pd.DataFrame, column: str) -> dict[str, float]:
     return reps.groupby(level=0).mean().to_dict()
 
 
-def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
-    """Check statuses, flow outputs and feature values of the main run."""
+def _check_status(checks: Checks, run: Path, design: DemoDesign) -> None:
+    """Check field-of-view statuses and the saved optical-flow outputs."""
     fovs = pd.read_csv(run / "fovs.csv")
     n_real = len(CONDITIONS) * design.repeats * design.fovs_per_repeat
     complete = fovs[fovs["status"] == "complete"]
@@ -175,7 +170,7 @@ def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
         f"{len(failed)}: {failed['message'].tolist()}",
         len(failed) == 1 and "does not exist" in failed["message"].iloc[0],
     )
-    half = 3
+    half = FlowParameters().half_window
     expected = list(range(half, design.shape[0] - half))
     frames_ok = all(
         [f.source_frame for f in open_result(run / "flow" / u).frames] == expected
@@ -187,7 +182,10 @@ def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
         "all FOVs" if frames_ok else "mismatch",
         frames_ok,
     )
-    per_fov = pd.read_csv(run / "features" / "features_per_fov.csv")
+
+
+def _check_motion(checks: Checks, per_fov: pd.DataFrame, design: DemoDesign) -> None:
+    """Check recovered speed, coherence and direction against the ground truth."""
     scale = design.calibration.pixel_size_x / design.calibration.frame_interval
     speed = _condition_means(per_fov, "speed_xy_median__tmean")
     ratio = speed["drug"] / speed["ctrl"]
@@ -214,6 +212,10 @@ def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
         round(float(direction.abs().max()), 2),
         bool((direction.abs() < 15).all()),
     )
+
+
+def _check_axial_and_confounders(checks: Checks, per_fov: pd.DataFrame, design: DemoDesign) -> None:
+    """Check the axial noise floor (true vz = 0) and the nuclear-size confounder."""
     z_scale = design.calibration.pixel_size_z / design.calibration.frame_interval
     drift = float((per_fov["vz_mean__tmean"] / z_scale).abs().max())
     checks.add(
@@ -237,6 +239,14 @@ def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
         round(size_ratio, 3),
         0.8 <= size_ratio <= 1.25,
     )
+
+
+def check_run(checks: Checks, run: Path, design: DemoDesign) -> pd.DataFrame:
+    """Check statuses, flow outputs and feature values of the main run."""
+    _check_status(checks, run, design)
+    per_fov = pd.read_csv(run / "features" / "features_per_fov.csv")
+    _check_motion(checks, per_fov, design)
+    _check_axial_and_confounders(checks, per_fov, design)
     return per_fov
 
 
