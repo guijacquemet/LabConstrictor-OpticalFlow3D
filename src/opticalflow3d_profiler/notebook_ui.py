@@ -193,7 +193,7 @@ class LoadStep:
         header = inspect_tiff(Path(row["image_path"]))
         self.session.example, self.session.header, self.session.spec = row, header, None
         print(f"Example image (random, seed {seed}):")
-        display(header_summary(header, row).style.hide(axis="index"))
+        display(header_summary(header, row).set_index("field"))
         self.axes.value = "" if header.axes_ambiguous else header.header_axes
         cal = header.calibration_suggestion
         values = (cal.pixel_size_x, cal.pixel_size_y, cal.pixel_size_z, cal.frame_interval)
