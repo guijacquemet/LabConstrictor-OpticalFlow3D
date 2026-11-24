@@ -282,3 +282,14 @@ def test_each_flow_run_owns_its_temporary_folder(tmp_path, imagej_file, monkeypa
                  flow / "f", "f")  # fmt: skip
     assert (stale / "other.txt").read_text() == "not ours"
     assert sorted(p.name for p in flow.iterdir()) == [stale.name]
+
+
+def test_identity_changes_name_the_changed_entry_of_a_list():
+    from opticalflow3d_profiler.flow_store import identity_changes
+
+    old = {"frame_map": [{"source_frame": t} for t in range(3, 50)], "parameters": {"w_sig": 4}}
+    new = {"frame_map": [{"source_frame": t} for t in range(3, 50)], "parameters": {"w_sig": 4}}
+    new["frame_map"][10]["source_frame"] = 99
+    assert identity_changes(old, new) == ["frame_map[10].source_frame: 13 → 99"]
+    new["frame_map"] = new["frame_map"][:5]
+    assert identity_changes(old, new) == ["frame_map: 47 entries → 5"]

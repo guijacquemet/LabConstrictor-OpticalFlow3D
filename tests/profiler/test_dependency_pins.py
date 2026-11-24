@@ -52,3 +52,12 @@ def test_the_colab_cell_pins_the_specified_versions():
     spec = pins(SPEC.read_text(encoding="utf-8"), VERSION_PIN)
     for name, version in pins(colab_install_cell(), VERSION_PIN).items():
         assert spec.get(name) == version, name
+
+
+def test_every_installation_path_pins_the_specified_versions():
+    # Round 3: only the Colab cell's own version pins were compared with the specification.
+    spec = pins(SPEC.read_text(encoding="utf-8"), VERSION_PIN)
+    assert {"numpy", "tifffile", "pandas"} <= set(spec)
+    for name in ("requirements.txt", "requirements_gpu.txt"):
+        found = pins((ROOT / name).read_text(encoding="utf-8"), VERSION_PIN)
+        assert {k: found.get(k) for k in spec} == spec, name

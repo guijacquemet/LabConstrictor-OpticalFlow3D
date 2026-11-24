@@ -377,9 +377,12 @@ def _convert(value: float | None, unit: str, table: dict[str, float], kind: str)
     key = unit.strip()
     if key not in table:
         raise InputError(f"Unknown {kind} unit '{unit}'. Use one of: {', '.join(table)}.")
-    if not value > 0:
-        raise InputError(f"A {kind} calibration must be positive, not {value}.")
-    return float(value) * table[key]
+    if not (math.isfinite(value) and value > 0):
+        raise InputError(f"A {kind} calibration must be a positive finite number, not {value}.")
+    converted = float(value) * table[key]
+    if not math.isfinite(converted):  # 1e308 mm overflows in µm
+        raise InputError(f"A {kind} calibration of {value} {key} is too large to convert.")
+    return converted
 
 
 def check_calibration(calibration: Calibration) -> list[Issue]:

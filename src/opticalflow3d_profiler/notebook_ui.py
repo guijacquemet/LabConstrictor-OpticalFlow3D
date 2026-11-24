@@ -177,8 +177,9 @@ class LoadStep:
         """Discover the experiment, show its design and an example image's header."""
         if not self.experiment.value.strip() or not self.results.value.strip():
             raise InputError("Give the experiment folder and the results folder.")
-        root = Path(self.experiment.value.strip()).resolve()
-        results = Path(self.results.value.strip()).resolve()
+        # Paths are used as typed: a folder name may end with a space (m1, round 3).
+        root = Path(self.experiment.value).resolve()
+        results = Path(self.results.value).resolve()
         if results.is_relative_to(root):
             raise InputError("The results folder must be outside the experiment folder.")
         metadata = read_experiment_folder(root)

@@ -312,6 +312,12 @@ def test_a_run_label_never_equals_another_runs_folder_name(tmp_path):
     assert labels[first] == generated == run_labels([first])[first]  # stable for one run
     with pytest.raises(InputError, match="same run folder"):
         run_labels([first, tmp_path / "seriesA" / "x" / ".." / "run-1"])
+    with pytest.raises(InputError, match="same run folder"):
+        run_labels([first, first])  # round 3: the same Path twice was silently collapsed
+    first.mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(first)
+    with pytest.raises(InputError, match="same run folder"):
+        run_labels([first, tmp_path / "alias" / "."])  # a link to the same folder
 
 
 def test_repeated_or_shadowed_feature_columns_are_refused(experiment, tmp_path):

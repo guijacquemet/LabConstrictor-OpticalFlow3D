@@ -99,3 +99,16 @@ def test_sigmas_must_be_positive_so_a_window_has_three_frames():
     for name in ("xyz_sig", "w_sig", "t_sig"):  # round 3: xyzSig=1e308 overflowed math.ceil
         huge_spatial = FlowParameters(**{name: 1e308})
         assert codes(check_time_and_depth(15, 11, huge_spatial)) == {"sigma_too_large"}
+
+
+def test_calibration_must_be_finite_before_and_after_conversion():
+    # Round 3: infinity was accepted and 1e308 mm overflowed to infinity in µm.
+    from opticalflow3d_profiler.validation import InputError, to_micrometres, to_minutes
+
+    with pytest.raises(InputError, match="positive finite"):
+        to_micrometres(float("inf"), "µm")
+    with pytest.raises(InputError, match="too large to convert"):
+        to_micrometres(1e308, "mm")
+    with pytest.raises(InputError, match="positive finite"):
+        to_minutes(float("nan"), "s")
+    assert to_micrometres(650, "nm") == pytest.approx(0.65)

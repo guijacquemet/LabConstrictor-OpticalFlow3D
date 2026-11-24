@@ -215,10 +215,15 @@ COLLECTIVE_ROWS = [
     ),
 ]
 
+GRID = (
+    " The regions are fixed XY squares, so rotating the image moves their boundaries and can"
+    " change the value: compare samples imaged in a similar orientation."
+)
+
 SPATIAL_ROWS = [
     (
         "regional_speed_cv",
-        "Variation of mean speed between fixed square XY regions (region_size_px, all Z).",
+        "Variation of mean speed between fixed square XY regions (region_size_px, all Z)." + GRID,
         "std(R)/mean(R), R = region mean speeds",
         "1",
         "speed",
@@ -227,7 +232,7 @@ SPATIAL_ROWS = [
     ),
     (
         "regional_speed_spread",
-        "Regional speed heterogeneity.",
+        "Regional speed heterogeneity." + GRID,
         "(P90(R)-P10(R))/median(R)",
         "1",
         "speed",
@@ -236,7 +241,7 @@ SPATIAL_ROWS = [
     ),
     (
         "regional_coherence_sd",
-        "Variation of directional coherence between regions.",
+        "Variation of directional coherence between regions." + GRID,
         "std of region |Σv|/Σ|v| (XY)",
         "1",
         "vx, vy",
@@ -245,7 +250,7 @@ SPATIAL_ROWS = [
     ),
     (
         "regional_moving_fraction",
-        "Fraction of regions whose mean speed exceeds motion_threshold.",
+        "Fraction of regions whose mean speed exceeds motion_threshold." + GRID,
         "mean(R > motion_threshold)",
         "1",
         "speed, motion_threshold",

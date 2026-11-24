@@ -77,15 +77,16 @@ def run_labels(runs: list[Path]) -> dict[Path, str]:
     InputError
         When two runs get one label (the same folder listed twice).
     """
-    labels = {
-        run: f"{run.name}-{hashlib.sha256(str(run.resolve()).encode('utf-8')).hexdigest()[:16]}"
-        for run in runs
-    }
+    labels: dict[Path, str] = {}
     seen: dict[str, Path] = {}
-    for run, label in labels.items():
-        if label in seen:
-            raise InputError(f"{seen[label]} and {run} are the same run folder; load it once.")
-        seen[label] = run
+    for run in runs:  # every entry, so a folder listed twice is refused, not merged
+        resolved = str(Path(run).resolve())  # a symbolic link to a run is the same run
+        label = f"{Path(run).name}-{hashlib.sha256(resolved.encode('utf-8')).hexdigest()[:16]}"
+        for key in (label, resolved):
+            if key in seen:
+                raise InputError(f"{seen[key]} and {run} are the same run folder; load it once.")
+            seen[key] = run
+        labels[run] = label
     return labels
 
 
@@ -104,8 +105,11 @@ def _read_table(run: Path, label: str) -> pd.DataFrame:
 
 
 def _check_dictionary(run: Path, info: dict, several: bool) -> None:
-    """Refuse a feature dictionary that describes a column twice, or, when runs are combined,
-    one without the identity of its feature definitions and code."""
+    """Refuse a feature dictionary that describes a column twice.
+
+    When runs are combined, also refuse one without the identity of its feature definitions
+    and code.
+    """
     names = [d["name"] for d in info.get("fov_features", [])]
     twice = sorted({n for n in names if names.count(n) > 1})
     if twice:

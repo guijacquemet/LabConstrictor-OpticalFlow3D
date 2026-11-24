@@ -110,7 +110,7 @@ class ResultsStep:
 
     def load(self) -> None:
         """Load and combine the per-FOV tables; show the design they hold."""
-        listed = [Path(p.strip()) for p in self.runs.value.splitlines() if p.strip()]
+        listed = [Path(p) for p in self.runs.value.splitlines() if p.strip()]  # as typed
         if not listed and self.session.run_dir is None:
             raise InputError("List at least one run folder, or process the experiment first.")
         features = load_runs(listed or [self.session.run_dir], self.shared.value)

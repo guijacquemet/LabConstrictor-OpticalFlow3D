@@ -82,10 +82,10 @@ How different the motion is between regions of the field of view: the image is c
 
 | Column | What it measures | How it is computed | Unit | Use | Undefined (empty) when |
 |---|---|---|---|---|---|
-| `regional_speed_cv` | Variation of mean speed between fixed square XY regions (region_size_px, all Z). | `std(R)/mean(R), R = region mean speeds` | none (ratio) | readout | fewer than 2 full regions with min_region_voxels analysed voxels |
-| `regional_speed_spread` | Regional speed heterogeneity. | `(P90(R)-P10(R))/median(R)` | none (ratio) | readout | fewer than 2 full regions with min_region_voxels analysed voxels |
-| `regional_coherence_sd` | Variation of directional coherence between regions. | `std of region \|Σv\|/Σ\|v\| (XY)` | none (ratio) | readout | fewer than 2 full regions with min_region_voxels analysed voxels |
-| `regional_moving_fraction` | Fraction of regions whose mean speed exceeds motion_threshold. | `mean(R > motion_threshold)` | none (ratio) | readout | motion_threshold not set; no region |
+| `regional_speed_cv` | Variation of mean speed between fixed square XY regions (region_size_px, all Z). The regions are fixed XY squares, so rotating the image moves their boundaries and can change the value: compare samples imaged in a similar orientation. | `std(R)/mean(R), R = region mean speeds` | none (ratio) | readout | fewer than 2 full regions with min_region_voxels analysed voxels |
+| `regional_speed_spread` | Regional speed heterogeneity. The regions are fixed XY squares, so rotating the image moves their boundaries and can change the value: compare samples imaged in a similar orientation. | `(P90(R)-P10(R))/median(R)` | none (ratio) | readout | fewer than 2 full regions with min_region_voxels analysed voxels |
+| `regional_coherence_sd` | Variation of directional coherence between regions. The regions are fixed XY squares, so rotating the image moves their boundaries and can change the value: compare samples imaged in a similar orientation. | `std of region \|Σv\|/Σ\|v\| (XY)` | none (ratio) | readout | fewer than 2 full regions with min_region_voxels analysed voxels |
+| `regional_moving_fraction` | Fraction of regions whose mean speed exceeds motion_threshold. The regions are fixed XY squares, so rotating the image moves their boundaries and can change the value: compare samples imaged in a similar orientation. | `mean(R > motion_threshold)` | none (ratio) | readout | motion_threshold not set; no region |
 
 ## Quality control
 

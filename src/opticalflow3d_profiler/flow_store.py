@@ -112,6 +112,14 @@ def identity_changes(recorded: object, expected: object, path: str = "") -> list
         ]  # fmt: skip
     if recorded == expected:
         return []
+    if isinstance(recorded, list) and isinstance(expected, list):
+        if len(recorded) != len(expected):
+            return [f"{path}: {len(recorded)} entries → {len(expected)}"]
+        changed = [i for i, (a, b) in enumerate(zip(recorded, expected, strict=True)) if a != b]
+        found = [c for i in changed[:3] for c in identity_changes(recorded[i], expected[i],
+                                                                  f"{path}[{i}]")]  # fmt: skip
+        more = len(changed) - 3
+        return found + ([f"{path}: {more} more entries differ"] if more > 0 else [])
     shown = [repr(v) if len(repr(v)) <= 40 else "(long value)" for v in (recorded, expected)]
     return [f"{path or 'identity'}: {shown[0]} → {shown[1]}"]
 
