@@ -136,11 +136,13 @@ def write_json(path: Path, data: object) -> None:
 
 
 def write_json_new(path: Path, data: object) -> None:
-    """Write JSON atomically, refusing to replace an existing file (round 4).
+    """Write JSON without ever replacing an existing file (round 4).
 
-    The text goes to a unique temporary file that is then hard-linked to ``path``; a link
-    fails when ``path`` exists, so a file another writer published in the meantime (a run
-    manifest, for example) is never replaced.
+    The text goes to a unique temporary file that is then hard-linked to ``path``: atomic,
+    and the link fails when ``path`` exists, so a file another writer published in the
+    meantime (a run manifest, for example) is never replaced. On storage without hard links
+    (some SMB, exFAT or FAT shares) the file is created exclusively instead
+    (``O_CREAT | O_EXCL``): still never replacing a file, but written in place.
 
     Raises
     ------
@@ -159,8 +161,28 @@ def write_json_new(path: Path, data: object) -> None:
             raise InputError(
                 f"{path} appeared while this run was writing; it is not replaced."
             ) from error
+        except (OSError, AttributeError):  # no hard links on this storage
+            _write_exclusive(path, text)
     finally:
         os.unlink(tmp)
+
+
+def _write_exclusive(path: Path, text: str) -> None:
+    """Create ``path`` exclusively and write ``text``; remove it if writing fails."""
+    try:
+        handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError as error:
+        raise InputError(
+            f"{path} appeared while this run was writing; it is not replaced."
+        ) from error
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)  # our own, just created, incomplete file
+        raise
 
 
 def write_csv(path: Path, table: pd.DataFrame) -> None:
