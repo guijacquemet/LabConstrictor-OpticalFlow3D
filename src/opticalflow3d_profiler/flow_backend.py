@@ -287,7 +287,10 @@ def compute_frame(window: np.ndarray, params: FlowParameters) -> dict[str, np.nd
 
 
 def correction_identity() -> dict[str, str | None]:
-    """Return the identity of the code that corrects a window: the adapter and its caller.
+    """Return the identity of the code that measures and corrects a window's brightness.
+
+    Used for the corrected-flow identity and for the brightness QC recorded with every flow
+    (which :func:`flow_window` measures even without correction).
 
     :func:`brightness.implementation_identity` (normalization version, ``time_series`` and
     ``brightness.py``) plus the SHA-256 of :func:`flow_window`, which decides when and how
@@ -450,7 +453,7 @@ def _flow_manifest(
         "outputs": outputs,
         "velocity_units": {"vx": "pixel/frame", "vy": "pixel/frame", "vz": "slice/frame"},
         "reliability": "smallest eigenvalue of the Lucas-Kanade structure tensor (upstream)",
-        "brightness_qc": implementation_identity(),
+        "brightness_qc": correction_identity(),  # flow_window measures it (round 4)
         "application_version": __version__,
         "python": sys.version.split()[0],
         "numpy": np.__version__,

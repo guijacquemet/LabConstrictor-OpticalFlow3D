@@ -17,6 +17,7 @@ import pandas as pd
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
 from .naming import feature_key
+from .results import definitions_sha256
 from .validation import InputError
 
 
@@ -114,7 +115,16 @@ def _check_dictionary(run: Path, info: dict, several: bool) -> None:
     twice = sorted({n for n in names if names.count(n) > 1})
     if twice:
         raise InputError(f"{run} describes these features twice: {', '.join(twice)}.")
-    if several and "feature_implementation" not in info:
+    recorded = info.get("feature_implementation")
+    if recorded is not None:
+        actual = definitions_sha256(info.get("frame_features", []) + info.get("fov_features", []))
+        if recorded.get("definitions_sha256") != actual:
+            raise InputError(
+                f"{run}: the feature definitions in feature_dictionary.json do not match their "
+                "recorded hash (the file was edited after the run); its features cannot be "
+                "trusted or combined."
+            )
+    if several and recorded is None:
         raise InputError(
             f"{run} was extracted before runs recorded the identity of their feature definitions "
             "and code, so it cannot be shown to measure the same thing as the other runs. "
@@ -140,9 +150,14 @@ def _check_same_features(run: Path, first: Path, info: dict, reference: dict) ->
             "speed mode or object-set name; runs cannot be combined."
         )
     mine, theirs = info["feature_implementation"], reference["feature_implementation"]
-    differ = [k for k in ("definitions_sha256", "code_sha256") if mine.get(k) != theirs.get(k)]
+    keys = ("definitions_sha256", "code_sha256", "normalization")
+    differ = [k for k in keys if mine.get(k) != theirs.get(k)]
     if differ:
-        what = {"definitions_sha256": "feature definitions", "code_sha256": "feature code"}
+        what = {
+            "definitions_sha256": "feature definitions",
+            "code_sha256": "feature code",
+            "normalization": "normalization code",
+        }
         raise InputError(
             f"{run} and {first} were computed with other {' and '.join(what[k] for k in differ)} "
             "(another profiler version): columns with one name may not measure the same thing, "

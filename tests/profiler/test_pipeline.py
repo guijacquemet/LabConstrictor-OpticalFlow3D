@@ -545,11 +545,11 @@ def test_reused_flow_keeps_its_velocities_but_not_stale_brightness_qc():
     # velocity identity; reused flow must not carry QC of another implementation.
     from types import SimpleNamespace
 
-    from opticalflow3d_profiler.brightness import implementation_identity
+    from opticalflow3d_profiler.flow_backend import correction_identity
     from opticalflow3d_profiler.pipeline import brightness_qc_current, brightness_warning
 
     outputs = [{"brightness_change_per_frame": 0.5}]
-    current = SimpleNamespace(manifest={"brightness_qc": implementation_identity(),
+    current = SimpleNamespace(manifest={"brightness_qc": correction_identity(),
                                         "outputs": outputs})  # fmt: skip
     other = SimpleNamespace(manifest={"brightness_qc": {"version": "0.7.1"}, "outputs": outputs})
     assert brightness_qc_current(current) and not brightness_qc_current(other)
@@ -574,3 +574,45 @@ def test_run_and_report_names_never_lead_outside_their_folder(tmp_path, name):
         contained(results, name, "report name")
     assert sorted(p.name for p in experiment.iterdir()) == []
     assert create_run(results, "run-ok").parent == results
+
+
+def test_an_edited_dictionary_is_refused_even_with_its_old_hash(experiment, tmp_path):
+    # Round 4: a definition changed without updating the stored hash was still combined.
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    b = _copy_run(run, tmp_path / "b", "b-")
+    _edit_dictionary(b, lambda i: i["fov_features"][0].update(formula="something else"))
+    with pytest.raises(InputError, match="do not match their recorded hash"):
+        load_runs([a, b])
+    with pytest.raises(InputError, match="do not match their recorded hash"):
+        load_runs([b])
+
+
+def test_the_feature_identity_covers_the_velocity_code_and_normalization():
+    from opticalflow3d_profiler.results import FEATURE_MODULES, feature_implementation
+
+    for module in ("flow_backend.py", "image_io.py", "_upstream/calc_flow.py"):
+        assert module in FEATURE_MODULES
+    assert "time_series_sha256" in feature_implementation([])["normalization"]
+
+
+def test_reusing_flow_after_a_change_of_flow_window_leaves_brightness_qc_empty(
+    experiment, monkeypatch
+):
+    # Round 4: brightness QC is measured in flow_window; a changed flow_window kept old QC.
+    from opticalflow3d_profiler import flow_backend
+
+    root, metadata, run, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    real = flow_backend.inspect.getsource
+    monkeypatch.setattr(
+        flow_backend.inspect, "getsource",
+        lambda obj: real(obj) + "# edited" if obj is flow_backend.flow_window else real(obj),
+    )  # fmt: skip
+    new = create_run(root / "results", "run-after-edit")
+    manifest = run_experiment(one, settings(), new, reuse_from=run)
+    assert manifest["fovs"][0]["flow_origin"].startswith("reused")  # velocities still valid
+    frames = pd.read_csv(new / "features" / "features_per_frame.csv")
+    assert frames["qc_brightness_change_per_frame"].isna().all()
+    assert frames["undefined_features"].str.contains("not reused").all()
+    assert "Brightness QC not reused" in manifest["fovs"][0]["warnings"]

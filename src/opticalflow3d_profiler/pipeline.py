@@ -17,12 +17,11 @@ from pathlib import Path
 import pandas as pd
 
 from .brightness import WARNING_CHANGE_PER_FRAME
-from .brightness import implementation_identity as brightness_identity
 from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, ImageSpec
 from .config import to_record as record
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import dictionary_records, frame_dictionary
-from .flow_backend import flow_identity, run_flow, upstream_identity
+from .flow_backend import correction_identity, flow_identity, run_flow, upstream_identity
 from .flow_features import frame_features, velocity_scale
 from .flow_store import FlowResult, open_result, verify_result
 from .foreground import describe, threshold_frame
@@ -228,7 +227,7 @@ def brightness_qc_current(result: FlowResult) -> bool:
     velocity identity; reused velocities stay valid, their brightness QC only when the
     recorded implementation is the current one (round 3).
     """
-    return result.manifest.get("brightness_qc") == brightness_identity()
+    return result.manifest.get("brightness_qc") == correction_identity()
 
 
 def brightness_reason(recorded: dict[str, object]) -> str:

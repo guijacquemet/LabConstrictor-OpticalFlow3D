@@ -214,9 +214,17 @@ FEATURE_MODULES = (
     "brightness.py",
     "feature_dictionary.py",
     "pipeline.py",
+    "flow_backend.py",
+    "image_io.py",
+    "config.py",
+    "naming.py",
+    "_upstream/calc_flow.py",
+    "_upstream/__init__.py",
 )
-"""The modules whose code decides feature values: masks, per-frame features, time averages,
-brightness QC, definitions and the code that applies them per frame."""
+"""The modules whose code decides feature values: the velocity generation (the vendored
+OpticalFlow3D code, its adapter and the image reading), masks, per-frame features, time
+averages, brightness QC, definitions, settings and column names (round 4: the velocity path
+was missing)."""
 
 
 def feature_implementation(records: list[dict[str, str]]) -> dict[str, str]:
@@ -231,11 +239,19 @@ def feature_implementation(records: list[dict[str, str]]) -> dict[str, str]:
     code = hashlib.sha256()
     for name in FEATURE_MODULES:
         code.update(name.encode("utf-8") + b"\0" + (package / name).read_bytes() + b"\0")
-    definitions = json.dumps(records, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    from .brightness import implementation_identity as normalization_identity
+
     return {
-        "definitions_sha256": hashlib.sha256(definitions).hexdigest(),
+        "definitions_sha256": definitions_sha256(records),
         "code_sha256": code.hexdigest(),
+        "normalization": json.dumps(normalization_identity(), sort_keys=True),
     }
+
+
+def definitions_sha256(records: list[dict[str, str]]) -> str:
+    """Return the SHA-256 of feature definitions, independent of key order."""
+    text = json.dumps(records, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def now() -> str:
