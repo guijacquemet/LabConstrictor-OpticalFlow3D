@@ -293,3 +293,18 @@ def test_identity_changes_name_the_changed_entry_of_a_list():
     assert identity_changes(old, new) == ["frame_map[10].source_frame: 13 → 99"]
     new["frame_map"] = new["frame_map"][:5]
     assert identity_changes(old, new) == ["frame_map: 47 entries → 5"]
+
+
+def test_flow_folders_follow_the_process_umask(tmp_path, imagej_file):
+    # Round 4: the temporary folder was made world-readable (chmod 0o755) whatever the umask.
+    import os
+    import stat
+
+    path, _ = imagej_file
+    old = os.umask(0o077)
+    try:
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"),
+                 tmp_path / "flow" / "f", "f")  # fmt: skip
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE((tmp_path / "flow" / "f").stat().st_mode) & 0o077 == 0

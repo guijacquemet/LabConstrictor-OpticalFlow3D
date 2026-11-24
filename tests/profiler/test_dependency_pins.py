@@ -61,3 +61,16 @@ def test_every_installation_path_pins_the_specified_versions():
     for name in ("requirements.txt", "requirements_gpu.txt"):
         found = pins((ROOT / name).read_text(encoding="utf-8"), VERSION_PIN)
         assert {k: found.get(k) for k in spec} == spec, name
+    for name in ("requirements.lock.txt", "requirements_gpu.lock.txt"):  # round 4
+        # A lock can list a package once per platform marker; each specified version must be
+        # the one locked for it.
+        locked: dict[str, set[str]] = {}
+        for package, version in VERSION_PIN.findall((ROOT / name).read_text(encoding="utf-8")):
+            locked.setdefault(package.lower(), set()).add(version)
+        for package, version in spec.items():
+            assert locked.get(package) == {version}, (name, package, locked.get(package))
+    checks = pins((ROOT / "tools" / "requirements-checks.txt").read_text(encoding="utf-8"),
+                  VERSION_PIN)  # fmt: skip
+    assert {k: v for k, v in checks.items() if k in spec} == {
+        k: spec[k] for k in checks if k in spec
+    }

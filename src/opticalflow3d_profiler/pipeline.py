@@ -37,13 +37,14 @@ from .results import (
     relative,
     write_csv,
     write_json,
+    write_json_new,
 )
 from .temporal_features import aggregate_fov, fov_dictionary
 from .validation import (
     InputError,
+    calibration_issues,
     check_calibration,
     check_feature_settings,
-    calibration_issues,
     check_sigmas,
     check_time_and_depth,
     raise_for_errors,
@@ -552,5 +553,5 @@ def run_experiment(
             "tables": "CSV, UTF-8, NaN as empty cell",
         },
     }
-    write_json(run_dir / "run_manifest.json", manifest)
+    write_json_new(run_dir / "run_manifest.json", manifest)  # never replaces one (round 4)
     return manifest

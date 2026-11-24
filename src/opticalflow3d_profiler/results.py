@@ -20,6 +20,7 @@ import json
 import os
 import platform
 import sys
+import tempfile
 from datetime import UTC, datetime
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -132,6 +133,34 @@ def write_text_atomic(path: Path, text: str) -> None:
 def write_json(path: Path, data: object) -> None:
     """Write JSON atomically (sorted keys are not imposed; floats at full precision)."""
     write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False, allow_nan=True) + "\n")
+
+
+def write_json_new(path: Path, data: object) -> None:
+    """Write JSON atomically, refusing to replace an existing file (round 4).
+
+    The text goes to a unique temporary file that is then hard-linked to ``path``; a link
+    fails when ``path`` exists, so a file another writer published in the meantime (a run
+    manifest, for example) is never replaced.
+
+    Raises
+    ------
+    InputError
+        When ``path`` already exists.
+    """
+    path = Path(path)
+    text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=True) + "\n"
+    handle, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+        try:
+            os.link(tmp, path)
+        except FileExistsError as error:
+            raise InputError(
+                f"{path} appeared while this run was writing; it is not replaced."
+            ) from error
+    finally:
+        os.unlink(tmp)
 
 
 def write_csv(path: Path, table: pd.DataFrame) -> None:

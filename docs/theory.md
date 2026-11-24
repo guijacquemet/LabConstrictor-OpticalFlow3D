@@ -252,8 +252,10 @@ circle (each direction is spread linearly between its two nearest points), the k
 by FFT, and the integral is a trapezoid sum. The concavity bound holds for the continuous
 density; the grid computation follows it within its numerical error, which was measured: with
 `angle_bins` up to 360 (a 1° kernel, the largest allowed), a single direction placed anywhere on
-the grid gives at most 8.4 × 10⁻⁷ instead of 0, and rotations change the value by at most
-1.5 × 10⁻⁷. Finer kernels are not resolved by the grid and are refused (`angle_bins_too_large`).
+the grid gives at most 8.4 × 10⁻⁷ instead of 0, and rotations changed the value by at most
+1.5 × 10⁻⁷ in our tests and 2.5 × 10⁻⁷ in an independent sweep of 300 rotations (Python 3.11 and
+NumPy 2.2.6; Python 3.13 and NumPy 2.3.5): always below the tested tolerance of 10⁻⁶. These are
+the largest values found by sampling, not proven bounds. Finer kernels are not resolved by the grid and are refused (`angle_bins_too_large`).
 
 ### 5.4 Spatial heterogeneity → [glossary](features.md#spatial-heterogeneity)
 

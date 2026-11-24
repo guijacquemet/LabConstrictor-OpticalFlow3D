@@ -616,3 +616,18 @@ def test_reusing_flow_after_a_change_of_flow_window_leaves_brightness_qc_empty(
     assert frames["qc_brightness_change_per_frame"].isna().all()
     assert frames["undefined_features"].str.contains("not reused").all()
     assert "Brightness QC not reused" in manifest["fovs"][0]["warnings"]
+
+
+def test_a_manifest_published_meanwhile_is_never_replaced(tmp_path):
+    # Round 4: a manifest written after the claim's second check could be replaced.
+    from opticalflow3d_profiler.results import write_json_new
+
+    target = tmp_path / "run_manifest.json"
+    target.write_text('{"kind": "someone else"}')
+    with pytest.raises(InputError, match="not replaced"):
+        write_json_new(target, {"kind": "ours"})
+    assert json.loads(target.read_text()) == {"kind": "someone else"}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["run_manifest.json"]  # no temp left
+    fresh = tmp_path / "new.json"
+    write_json_new(fresh, {"a": 1})
+    assert json.loads(fresh.read_text()) == {"a": 1}

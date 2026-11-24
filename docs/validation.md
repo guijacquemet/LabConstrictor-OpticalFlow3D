@@ -132,5 +132,5 @@ Results on the crop (median XY speed in the tissue; brightness-equalised input):
 | 7 × 11 × 1840 × 1840 uint16 (synthetic), 4-vCPU VM | 83.5 s | 11.35 GB | 11.25 GB |
 
 For the representative dataset (15 frames): about 12-13 minutes and 11-12 GB of RAM per
-field of view, and 9.4 GB of float64 output (4.7 GB as float32). Not yet measured on the
+field of view, and 9.4 GB of output with float64 velocities (5.4 GB with float32: the reliability volume keeps the upstream's float32 in 3D). Not yet measured on the
 real data.

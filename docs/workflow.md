@@ -191,7 +191,7 @@ look plausible. Each click creates a new example run; earlier ones are kept.
 
 | Widget | Default | Effect |
 |---|---|---|
-| **Run name (optional)** | `run-<date>-<time>` (UTC) | Name of the new run folder inside the results folder. An existing, non-empty folder is refused: choose another name. |
+| **Run name (optional)** | `run-<date>-<time>` (UTC) | Name of the new run folder inside the results folder: one plain folder name (no `/`, `\`, `..` or outer spaces), used as typed. An existing, non-empty folder is refused: choose another name. |
 | **Save QC figures of every FOV** | ticked | After processing, saves the [QC figures](results.md#qc-figures) in `<run>/qc/`. |
 
 Click **Process the experiment**. With the settings of section 2, the app:
@@ -279,7 +279,7 @@ is only one condition, or no biological repeat holds both the control and anothe
 
 | Widget | Default | Effect |
 |---|---|---|
-| **Report name** | `report-1` | Folder name of the report, `<run>/analysis/<report name>/`. With several runs, the report goes into the first run folder (in path order). An existing report folder is refused. |
+| **Report name** | `report-1` | Folder name of the report, `<run>/analysis/<report name>/`. With several runs, the report goes into the first run folder (in path order). One plain folder name (no `/`, `\`, `..` or outer spaces). An existing report folder is refused. |
 
 Click **Create the HTML report**. Progress bars show the design scan, the statistics and the HTML
 page. The app prints a short summary from MorphoCoverage and a link **Open the report in a new
@@ -530,6 +530,8 @@ Empty cells are deliberate: the value does not exist. The reason is in `undefine
 | `No feature has values in these results; nothing can be compared.` | Every feature is undefined. | See [Empty features](#empty-undefined-features). |
 | `Confirm the experimental design first.` | Section 4b not confirmed. | Click **Confirm the design**. |
 | `… exists; reports are never overwritten.` | The report name is taken. | Choose another report name. |
+| `The run name / report name … must be one plain folder name …` or `… leads outside …` | The name contains `/`, `\`, `..`, outer spaces, or points out of its folder through a link. | Choose a simple name such as `run-1`. |
+| `'nan' is not a finite number …` / `non_finite_setting` / `invalid_calibration` | A text field or setting holds NaN or infinity, or a calibration value is not positive. | Enter an ordinary positive number, or leave an optional value empty. |
 
 **The report link does not open.**
 On a remote Jupyter server the `127.0.0.1` link points to your own computer. Open `report.html`

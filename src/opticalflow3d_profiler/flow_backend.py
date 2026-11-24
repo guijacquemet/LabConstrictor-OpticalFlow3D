@@ -15,8 +15,8 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -413,10 +413,11 @@ def run_flow(
     source = file_identity(spec.path)
     identity = flow_identity(spec, header, params, source)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
-    # Created exclusively with a unique name: this call owns it, so the cleanup below can never
-    # remove a folder of another thread, process or earlier attempt (round 3).
-    partial = Path(tempfile.mkdtemp(prefix=f"{out_dir.name}.partial-", dir=out_dir.parent))
-    partial.chmod(0o755)  # mkdtemp makes it private; published results stay readable as before
+    # Created exclusively (mkdir fails if it exists) with a unique name: this call owns it, so
+    # the cleanup below never removes another thread's, process's or attempt's folder (round 3).
+    # mkdir applies the process umask, so permissions are the deployment's own (round 4).
+    partial = out_dir.with_name(f"{out_dir.name}.partial-{uuid.uuid4().hex}")
+    partial.mkdir()
     started = time.monotonic()
     stage = (tracker or Tracker()).stage(
         f"Optical flow {name}", len(identity["frame_map"]), nested=True

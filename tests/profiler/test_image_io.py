@@ -192,8 +192,7 @@ def test_other_named_axes_are_refused_not_read_as_time(tmp_path, header_axes):
     tifffile.imwrite(path, np.zeros((7, 3, 8, 8), np.uint16), metadata={"axes": header_axes},
                      photometric="minisblack")  # fmt: skip
     header = inspect_tiff(path)
-    if header.header_axes != header_axes:
-        pytest.skip(f"tifffile reads {header_axes} as {header.header_axes}")
+    assert header.header_axes == header_axes  # a changed reading must fail, not skip (round 4)
     with pytest.raises(InputError, match="axes_contradict_header"):
         validate_image(ImageSpec(path, "TZYX"), header)
 
