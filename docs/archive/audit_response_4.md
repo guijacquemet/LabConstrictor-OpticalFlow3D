@@ -32,3 +32,21 @@ BLOCK. Each finding was checked against the code. Every change below has a regre
 | ULP test moved one ULP twice | Fixed: one ULP, then two. |
 | E24 hard links | Accepted as documented path-based behaviour. A hard link inside the report folder is a file in that folder. |
 | Entropy memory (about 374 MiB transient for 10^7 directions) | Noted. It is linear and below the optical flow's own peak. |
+
+## Documentation audit of PR #18 (`a3960f5`)
+
+The documentation audit's verdict was "not ready, documentation corrections required". Several
+of its points were code defects already fixed above: named axes, combining runs, the entropy
+bound and the per-slice estimate. The other corrections are listed below.
+
+| Point | Disposition |
+|---|---|
+| QC undefined conditions were generic | Fixed in `feature_dictionary.py`, so the glossary and every future `feature_dictionary.json` carry them. Each QC column has its own condition. Counts and grid coverage are never undefined. `qc_foreground_fraction` is 0 for an empty foreground. Brightness QC is measured on the whole raw window. |
+| `speed_3d_*`, regional denominators, the 1e-12 resultant threshold, undefined-speed propagation | Added to the definitions. 3D speed is in µm/min. `regional_moving_fraction` is a fraction of eligible regions, and one region is enough. |
+| X/Y component statistics; local coherence and regional grid orientation | The glossary family texts and `results.md` now distinguish global, orientation-independent statistics from spatial measurements fixed to the image grid. |
+| Default readout could fall back to `vz_sd` | Code fixed: after the median speeds, the mean lateral speed, then the first lateral feature. Tested. |
+| Section 1 calibration comparison omitted Y | Code fixed. Tested with a Y-only difference. |
+| The run-name statement, the orientation-descriptor list, the readout fallback, the percentile reliability wording, brightness flagged on its absolute value, the `auto` ratio (Z / X), the manifest versus `design.json`, global versus per-field-of-view checks, "another example" possibly the same image, temporary folders after a hard crash | Corrected in the pages. |
+| Disk figures | Corrected from the arrays actually written: 9.4 GB (float64), 5.4 GB (float32) in 3D; 8.0 GB or 5.4 GB per slice. |
+| "Built and tested" platform claims | Now "built for Linux x86-64 only; release 0.1.0 was installed and run on Linux; each release is tested before publication", in the README, the docs and the App Centre limitation. |
+| First reliability threshold | A short procedure was added to `workflow.md`: explore with `none`, read the reliability QC, choose one absolute threshold. |

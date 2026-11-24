@@ -25,7 +25,7 @@ limitations:
   - Speeds carry a size-dependent gain bias of the 3D algorithm (see docs/validation.md)
   - Axial (Z) measurements are experimental for shallow Z-stacks
   - About 11-12 GB of RAM per 1840 x 1840 x 11 stack; no tiling or GPU
-  - Installer validated on Linux x86-64 only
+  - Installer built for Linux x86-64 only; each release is tested before publication
 quickstart:
   - Install the app and open the OpticalFlow3D Profiler notebook from the Welcome page.
   - Choose the experiment and results folders; confirm the axes and calibration of an example image.

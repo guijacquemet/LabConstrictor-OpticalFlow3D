@@ -14,8 +14,9 @@ quality control, outputs, limitations and troubleshooting.
 
 The installer appears on the [Releases page](https://github.com/guijacquemet/LabConstrictor-OpticalFlow3D/releases)
 once a release is published ([download instructions](.tools/docs/download_executable.md)).
-**Only the Linux x86-64 installer is built and tested** (`distribution.platforms` in
-`labconstrictor-app.yaml`). The code is pure Python and should run on Windows and macOS, but those
+**Only the Linux x86-64 installer is built** (`distribution.platforms` in
+`labconstrictor-app.yaml`); release 0.1.0 was installed and run on Linux, and every new release
+is tested again before it is published. The code is pure Python and should run on Windows and macOS, but those
 installers are untested; add the platforms there to build them.
 
 The installer downloads the Python packages during installation. After that, the app works offline.
@@ -80,8 +81,8 @@ and flow figures for your own data.
 ## Resources
 
 For an 1840 × 1840 × 11 × 15 field of view: about **11–12 GB of RAM**, about **15 min** of
-processing (measured on a 4-vCPU machine), and 9.4 GB of float64 output per field of view
-(4.7 GB if you choose float32). The app has no tiling, GPU or multiprocessing, and never downsamples.
+processing (measured on a 4-vCPU machine), and 9.4 GB of output per field of view with float64
+velocities (5.4 GB with float32: the reliability volume keeps the upstream's precision). The app has no tiling, GPU or multiprocessing, and never downsamples.
 
 ## Run folder
 

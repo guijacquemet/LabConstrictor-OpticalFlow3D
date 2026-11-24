@@ -13,8 +13,11 @@ starting with ⚠️ that says what to fix) below them.
 | [4. Analyse the results](#section-4-analyse-the-results) | Load runs, define the design, create the MorphoCoverage report | `<run>/analysis/<report name>/` |
 | [Optional: synthetic demo](#optional-synthetic-demo) | Check an installation against a known answer | a new demo folder |
 
-Every choice is saved in the run folder (`run_manifest.json`), so a result can always be traced
-back to its images and settings ([Outputs](results.md#outputs-and-run-folder)).
+Every processing choice (calibration, optical-flow, foreground, reliability and feature settings)
+is saved in the run folder (`run_manifest.json`); the design of a comparison (control, readout,
+pairing, seed) is saved with its report (`analysis/<report>/design.json`). The QC-figure option of
+section 3 only controls an optional export. So a result can always be traced back to its images
+and settings ([Outputs](results.md#outputs-and-run-folder)).
 
 ---
 
@@ -61,8 +64,8 @@ Click **1. Load the experiment**. The app:
    series, file size, X/Y pixel size, Z spacing, frame interval, calibration source, and notes
    (for example units taken from defaults, or axes not named). The random seed is printed.
 
-**Another example image** opens a different random image, so you can check that the images look
-alike. It also resets the axes and calibration fields to that image's header values.
+**Another example image** draws another random image (it can be the same one again), so you can
+check that the images look alike. It also resets the axes and calibration fields to that image's header values.
 
 ### 2. Confirm axes and calibration
 
@@ -138,6 +141,21 @@ These feature settings are fixed at their defaults in the notebook (they are rec
 | `min_direction_vectors` | 20 | Fewer directed vectors make the angular features undefined. |
 | `min_local_vectors` | 5 | Minimum analysed nonzero vectors in a local-coherence window. |
 
+### Choosing a first reliability threshold
+
+The reliability filter starts as `absolute` with an empty value, which must be filled before
+anything is processed. A simple first procedure:
+
+1. Set the filter to `none` and **Process the example** (exploration only).
+2. Look at `qc_reliability_median`, `qc_reliability_p10` and `qc_reliability_p90` of the example
+   (and at the log10 reliability panel of the [QC figures](results.md#qc-figures)).
+3. Choose an `absolute` threshold below most foreground values, for example near the 10th
+   percentile, and process the example again to check `qc_reliable_fraction`.
+4. Use that one threshold for every condition of the experiment.
+
+Without filtering (`none`), every finite velocity counts, including those in flat, textureless
+areas where optical flow is poorly determined: use it to explore, and say so if you report it.
+
 ### Estimate resources
 
 **Estimate resources** prints, for one field of view of the example's size:
@@ -178,10 +196,12 @@ look plausible. Each click creates a new example run; earlier ones are kept.
 
 Click **Process the experiment**. With the settings of section 2, the app:
 
-1. creates the run folder, then checks the settings (missing threshold or reliability value,
-   incompatible choices) before writing any file in it. If the settings are refused, fix them and
-   click again with **another run name** (or an empty name): the folder already created counts as
-   used;
+1. checks the settings **before creating the run folder** (sigmas, missing threshold or
+   reliability value, incompatible choices, angle_bins): a refused setting leaves no folder, so
+   you can fix it and click again with the same run name. Problems that can only be found while
+   reading an image (for example a movie too short for `tSig`) are found per field of view during
+   processing and recorded as that field of view's failure;
+   then creates the run folder;
 2. **claims the run folder** by creating `run_started.json`. A folder that already holds a run
    (finished, running or interrupted) is never entered again;
 3. processes every field of view in `fov_uid` order. Progress bars show the fields of view, and
@@ -237,7 +257,7 @@ of run A and `rep1` of run B are two repeats. The software cannot check this.
 | Widget | Default | Meaning |
 |---|---|---|
 | **Control** | first condition (alphabetical) | The condition every other condition is compared with. |
-| **Readout** | median speed (`speed_3d_median` when it has values, else `speed_xy_median`) | The main feature: it leads the report. Every declared feature is still tested alike. The list holds every readout feature with values, including the experimental axial ones; a chosen axial readout is always included. |
+| **Readout** | a speed with values: `speed_3d_median`, else `speed_xy_median`, else `lateral_speed_mean`, else the first lateral feature with values (an experimental axial feature only when nothing else has values) | The main feature: it leads the report. Every declared feature is still tested alike. The list holds every readout feature with values, including the experimental axial ones; a chosen axial readout is always included. |
 | **Also include experimental axial features** | unticked | Also give the Z-dependent features (`vz_*`, `axial_lateral_ratio`, `coherence_3d_global`, `speed_3d_*`) to MorphoCoverage. |
 | **A biological-repeat label is the same repeat in every condition** | unticked | **Required.** Your confirmation that, for example, `rep1` of the control and `rep1` of the treatment were imaged the same day. MorphoCoverage pairs repeats across conditions only on this confirmation. |
 | **Random seed** | 0 | Seed of every MorphoCoverage resampling, so the report is reproducible. |
@@ -248,8 +268,9 @@ of run A and `rep1` of run B are two repeats. The software cannot check this.
    group.
 
 Only readout features (and axial ones on request) are given to MorphoCoverage. Orientation
-descriptors (`vx_mean`, `vy_mean`, `vz_mean`, `xy_dominant_direction_deg`) and `qc_*` columns are
-never features ([why](results.md#readouts-orientation-descriptors-and-qc)).
+descriptors (every `vx_*` and `vy_*` column, `vz_mean`, `xy_dominant_direction_deg`; the
+[glossary](features.md) gives each column's use) and `qc_*` columns are never features
+([why](results.md#readouts-orientation-descriptors-and-qc)).
 
 The design is refused when the repeats are not confirmed as paired, the control is unknown, there
 is only one condition, or no biological repeat holds both the control and another condition.
@@ -475,8 +496,8 @@ Empty cells are deliberate: the value does not exist. The reason is in `undefine
 | Every `vz_*` and axial column | Per-slice 2D optical flow. | Expected; choose 3D if you need axial features. |
 | `xy_angular_*`, `xy_aligned_fraction`, `xy_dominant_direction_deg` | Fewer than 20 analysed vectors with a direction. | More analysed voxels (foreground, reliability). |
 | `coherence_xy_local` | No window with 5 analysed nonzero vectors. | More analysed voxels, or a larger local window. |
-| `regional_*` | Fewer than 2 full regions with 100 analysed voxels; the region size may exceed the image. | Smaller region size. |
-| `regional_moving_fraction` | No moving-region threshold set. | Enter one in section 2. |
+| `regional_speed_cv`, `regional_speed_spread`, `regional_coherence_sd` | Fewer than 2 full regions with 100 analysed voxels (the region size may exceed the image), or a zero mean/median regional speed. | Smaller region size. |
+| `regional_moving_fraction` | No moving-region threshold set, or no region with 100 analysed voxels (one is enough). | Enter a threshold in section 2; a smaller region size. |
 | `qc_foreground_fraction`, `qc_object_*` | No foreground (whole image). | Expected. |
 | `qc_brightness_change_per_frame` | The central frame's mean intensity is not above 0. | Check the images. |
 | `time_min` | No frame interval. | Enter it in section 1. |
