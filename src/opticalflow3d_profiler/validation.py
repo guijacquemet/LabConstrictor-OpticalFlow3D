@@ -187,6 +187,46 @@ def check_channel(axes: str, shape: tuple[int, ...]) -> list[Issue]:
     return []
 
 
+MAX_SIGMA = 1e4
+"""Largest optical-flow sigma accepted (pixels or frames). Kernels span about 6 sigma; a larger
+sigma has no use on a microscopy image and its kernel size would overflow (round 3)."""
+
+
+def check_sigmas(params: FlowParameters) -> list[Issue]:
+    """Check that every optical-flow sigma is a positive finite number up to :data:`MAX_SIGMA`.
+
+    Needs no image, so it runs before a run folder is created and before any window or kernel
+    size is computed (``math.ceil(3 * 1e308)`` raises ``OverflowError``).
+    """
+    sigmas = (("xyzSig", params.xyz_sig), ("tSig", params.t_sig), ("wSig", params.w_sig))
+    bad = [
+        f"{name}={value}"
+        for name, value in sigmas
+        if not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
+    ]
+    if bad:
+        return [
+            Issue(
+                "error",
+                "invalid_sigma",
+                f"The optical-flow parameters must be positive numbers ({', '.join(bad)}); a "
+                "time window then always has at least 3 frames.",
+                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or other positive values.",
+            )
+        ]
+    large = [f"{name}={value}" for name, value in sigmas if value > MAX_SIGMA]
+    if large:
+        return [
+            Issue(
+                "error",
+                "sigma_too_large",
+                f"The optical-flow parameters must be at most {MAX_SIGMA:g} ({', '.join(large)}).",
+                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or values of a few units.",
+            )
+        ]
+    return []
+
+
 def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Issue]:
     """Check that the movie is long enough for the upstream time window.
 
@@ -204,25 +244,9 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
         ``window_length`` frames exist or Z has one slice; a warning when the Z stack is
         shorter than the spatial smoothing kernel.
     """
-    bad = [
-        f"{name}={value}"
-        for name, value in (
-            ("xyzSig", params.xyz_sig),
-            ("tSig", params.t_sig),
-            ("wSig", params.w_sig),
-        )
-        if not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
-    ]
-    if bad:
-        return [
-            Issue(
-                "error",
-                "invalid_sigma",
-                f"The optical-flow parameters must be positive numbers ({', '.join(bad)}); a "
-                "time window then always has at least 3 frames.",
-                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or other positive values.",
-            )
-        ]
+    sigma_issues = check_sigmas(params)
+    if sigma_issues:
+        return sigma_issues
     issues: list[Issue] = []
     if not 6 * params.t_sig + 1 <= n_t or n_t < params.window_length:  # no overflow first
         needed = params.window_length if math.isfinite(6 * params.t_sig) else "more"

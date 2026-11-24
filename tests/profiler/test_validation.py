@@ -92,7 +92,10 @@ def test_sigmas_must_be_positive_so_a_window_has_three_frames():
         assert codes(check_time_and_depth(15, 11, bad)) == {"invalid_sigma"}
     assert FlowParameters(t_sig=0.1).window_length >= 3
     huge = FlowParameters(t_sig=1e308)  # finite and positive, but 6 * tSig overflows
-    assert codes(check_time_and_depth(15, 11, huge)) == {"too_few_frames"}
+    assert codes(check_time_and_depth(15, 11, huge)) == {"sigma_too_large"}
     with pytest.raises(ValueError, match="too large"):
         _ = huge.window_length
     assert codes(check_time_and_depth(15, 11, FlowParameters(t_sig=0.1))) == set()
+    for name in ("xyz_sig", "w_sig", "t_sig"):  # round 3: xyzSig=1e308 overflowed math.ceil
+        huge_spatial = FlowParameters(**{name: 1e308})
+        assert codes(check_time_and_depth(15, 11, huge_spatial)) == {"sigma_too_large"}

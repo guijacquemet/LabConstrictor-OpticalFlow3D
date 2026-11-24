@@ -448,3 +448,16 @@ def test_shared_repeat_labels_are_named_for_the_user():
         {"run": ["A", "B", "A", "B"], "biological_repeat": ["r1", "r1", "r2", "r3"]}
     )
     assert shared_repeats(table) == {"r1": ["A", "B"]}
+
+
+def test_invalid_sigmas_are_refused_before_a_run_folder_is_claimed(experiment, tmp_path):
+    from opticalflow3d_profiler.pipeline import checked_settings
+
+    _, metadata, _, _ = experiment
+    bad = settings(flow=FlowParameters(mode="xyz", t_sig=0))
+    with pytest.raises(InputError, match="invalid_sigma|positive numbers"):
+        checked_settings(bad)
+    run = create_run(tmp_path, "sigma")
+    with pytest.raises(InputError):
+        run_experiment(metadata.iloc[:1], bad, run)
+    assert not (run / "run_started.json").exists()  # the folder stays usable

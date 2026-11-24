@@ -42,6 +42,7 @@ from .validation import (
     InputError,
     check_calibration,
     check_feature_settings,
+    check_sigmas,
     check_time_and_depth,
     raise_for_errors,
     resolve_flow_mode,
@@ -421,6 +422,7 @@ def checked_settings(settings: RunSettings, flow_only: bool = False) -> RunSetti
         For invalid feature or foreground settings, an invalid object-set name, or 3D speed
         with per-slice 2D optical flow.
     """
+    raise_for_errors(check_sigmas(settings.flow))  # tSig=0 must not claim a run folder
     settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
         raise_for_errors(check_feature_settings(settings.features, settings.foreground))
