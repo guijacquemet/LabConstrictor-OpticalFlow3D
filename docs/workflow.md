@@ -216,8 +216,11 @@ Click **Load the results**. The app reads `features/features_per_fov.csv` of eac
 per condition, the number of biological repeats and fields of view.
 
 Runs can be combined only when they are comparable. A run is refused when it has no feature
-tables, when its units or feature columns differ from the first run's, or when its optical-flow,
-feature or foreground settings differ (the message names the settings). The calibration values
+tables, when its units or feature columns differ from the first run's, when its optical-flow,
+feature or foreground settings differ (the message names the settings), or when its features
+were computed with other feature definitions or feature code (another app version: one column
+name may then measure something else). A run extracted before this identity was recorded can be
+loaded alone but not combined. The calibration values
 may differ as long as the units are the same. The same field of view in two runs is refused.
 
 **The shared-labels checkbox asserts something only you know.** Tick it only when the runs share
@@ -379,7 +382,7 @@ its problem. Typical problems:
 | `Unknown axis letters: …` / `An axis letter is repeated …` | Invalid letters. | Use each of `T`, `Z`, `C`, `Y`, `X` at most once. |
 | `N axis letters were given for an image with M dimensions …` | Wrong number of letters, or images with a different number of dimensions. | One letter per dimension; all images must have the same axes. |
 | `The image has no T axis.` / `no Z axis` | 2D time-lapse, or a single Z-stack. | 3D optical flow needs a time-lapse of Z-stacks (TZYX). |
-| `axes_contradict_header: … names its axes … in its header, but … was confirmed` | You confirmed a role that contradicts an axis the header names. | Confirm the header's axes, or fix the file's metadata (for example re-save it in Fiji with the correct hyperstack dimensions). |
+| `axes_contradict_header: … names its axes … in its header, but … was confirmed` | You confirmed a role that contradicts an axis the header names, or the header names an axis the app does not analyse (`… a dimension not analysed`). | Confirm the header's axes, or fix the file's metadata (for example re-save it in Fiji with the correct hyperstack dimensions). |
 | `Y and X must be the last two axes of the file …` | The file stores another layout. | Re-save the file with Y and X last. |
 | `The image has N channels; this tool analyses single-channel videos.` | Multi-channel file. | Save the nuclear channel alone (for example with Fiji). |
 | `multiple_series: … holds N image series …` | Several positions or scenes in one file. | Save one field of view per file. |
@@ -489,6 +492,10 @@ Empty cells are deliberate: the value does not exist. The reason is in `undefine
 | `… has no run_manifest.json; its settings cannot be checked.` | Interrupted run or wrong folder. | List a completed run. |
 | `… uses other units (…) than … ; runs cannot be combined.` | One run has a calibration (µm/min) and the other not (px/frame), or another frame interval unit. | Re-run with the same calibration. |
 | `… has other feature columns than … (for example …): another speed mode or object-set name; runs cannot be combined.` | The runs used another foreground name, speed mode, or intensity QC. | Re-run with the same settings. |
+| `… and … were computed with other feature definitions / feature code (another profiler version) …` | The runs come from different app versions. | Re-extract the features of every run with one version (new runs with `reuse_from` reuse their optical flow). |
+| `… was extracted before runs recorded the identity of their feature definitions and code …` | An older run is combined with others. | Re-extract it with this version. |
+| `sigma_too_large: The optical-flow parameters must be at most 10000 …` | A sigma above 10,000. | Use values of a few units (defaults 3, 1, 4). |
+| `angle_bins must be at most 360 …` | A finer angular resolution than the entropy can compute. | Use 36 (default) up to 360. |
 | `… was analysed with different settings from … (…); its features are not comparable.` | Optical-flow, feature or foreground settings differ (they are named). | Re-extract the features with the same settings. |
 | `The same field of view appears in several runs: …` | The same images were processed in two listed runs. | Load only one of these runs. |
 | `… and … are the same run folder; load it once.` | A folder listed twice. | Remove the duplicate line. |

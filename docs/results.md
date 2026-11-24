@@ -126,7 +126,9 @@ complete, so an interrupted run leaves no partial result.
 - **`feature_dictionary.json`**: `units` (`lateral`, `axial`, `time`), `column_naming` (scheme and
   object-set name), the metadata and frame-identifier columns, and one entry per column for the
   per-frame and per-FOV tables: name, family, description, formula, unit, level, requirements,
-  applicability (`biological`, `experimental_axial`, `orientation`, `qc`) and when it is undefined.
+  applicability (`biological`, `experimental_axial`, `orientation`, `qc`) and when it is undefined;
+  and `feature_implementation`: the SHA-256 of all these definitions and of the code that computes
+  the features. Runs are combined only when both are equal.
   The human-readable version is the [Feature glossary](features.md).
 
 Column names: `<foreground name>__<feature>` (`Nuclei__speed_xy_median`), or `whole__<feature>`
@@ -255,6 +257,7 @@ section 3 table, and stored in the `warnings` column of `fovs.csv` and in `run_m
 | Warning (start of the text) | Cause | What to do |
 |---|---|---|
 | `The global brightness changes by up to X% per frame (optical flow reads part of it as motion; consider brightness equalisation)` | `qc_brightness_change_per_frame` above 0.02 in at least one window of the field of view. | Compare `qc_brightness_change_per_frame` between conditions. If it differs or is large, consider a [brightness correction](theory.md#7-brightness-change-and-optional-correction) (for every condition). |
+| `Brightness QC not reused: …` | The optical flow was reused from a run whose brightness QC was measured by another brightness implementation. The velocities are still valid; `qc_brightness_change_per_frame` is left empty with the reason. | Recompute the optical flow (a new run without `reuse_from`) if you need the brightness QC. |
 | `... (brightness equalisation was applied to the optical-flow input)` | Same, with a correction switched on. | Check that the correction removed the artefact (speeds stable over time, `vz` near 0). |
 | `The header states pixel_size_x=… but … was used.` | The image header's calibration differs by more than 1 % from the confirmed calibration. | Check which value is right. Images with different acquisition settings belong in separate runs. |
 | `The Z stack (N slices) is shorter than the spatial derivative kernel …` | 3D mode with fewer slices than `2·ceil(3·xyzSig) + 1`. | Treat axial features as experimental, or use per-slice 2D flow. |
@@ -342,7 +345,7 @@ Every column has a *use* in the glossary (and in `feature_dictionary.json` as `a
 
 | Use | Given to MorphoCoverage? | Columns | Why |
 |---|---|---|---|
-| **readout** | Always | XY speed, `lateral_speed_mean`, XY coherence, angular entropy, dispersion and aligned fraction, regional columns | They describe the motion itself and do not change when the image is rotated. |
+| **readout** | Always | XY speed, `lateral_speed_mean`, XY coherence, angular entropy, dispersion and aligned fraction, regional columns | They describe the motion itself and do not change when the image is rotated, except the regional columns: their XY grid moves with the image, so compare samples imaged in a similar orientation. |
 | **axial readout (experimental)** | Only when you tick *Also include experimental axial features* (a chosen axial readout is always included) | `vz_sd`, `vz_abs_mean`, `axial_lateral_ratio`, `coherence_3d_global`, `speed_3d_*` | Axial velocities are less reliable in shallow stacks (see pitfalls). |
 | **orientation descriptor** | Never | every `vx_*` and `vy_*` column (`vx_mean`, `vx_sd`, `vx_abs_mean`, and the same for `vy`), `vz_mean`, `xy_dominant_direction_deg` | They depend on how the sample was placed under the microscope. Two identical samples rotated by 90° give different values, so they are not phenotypes. Use them only within one image, for example to check a known flow direction. |
 | **quality control** | Never | every `qc_*` column | They describe the measurement (reliability, occupancy, object size, brightness), not the biology. Treating them as phenotypes would let imaging differences masquerade as effects. |

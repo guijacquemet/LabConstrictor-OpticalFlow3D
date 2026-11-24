@@ -226,8 +226,9 @@ pixel type, number of series, file size, calibration, notes). You then type the 
   `(not named: confirm)`.
 - **An axis the header names keeps its role.** You may only choose the role of axes the header
   leaves unknown (tifffile shows them as `Q` or `I`). If the header says `ZCYX` you cannot confirm
-  `TZYX`: Z planes read as time points would give false velocities. The refusal starts with
-  `axes_contradict_header`. Fix the file's metadata instead (for example, re-save it in Fiji with
+  `TZYX`: Z planes read as time points would give false velocities. An axis the header names with
+  any other letter (`E`, `H`, `A`, `R`, `0`, …) is a dimension the app does not analyse, so such a
+  file is refused too. The refusal starts with `axes_contradict_header`. Fix the file's metadata instead (for example, re-save it in Fiji with
   the correct hyperstack dimensions).
 - One axis order is confirmed for the **whole run**. On **Confirm**, every image header of the
   experiment is checked against it (headers only, no pixels read). If any image cannot be
