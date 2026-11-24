@@ -81,8 +81,8 @@ def check_headers(metadata: pd.DataFrame, axes: str) -> pd.DataFrame:
             row.update(
                 shape=" × ".join(str(n) for n in header.shape),
                 **{"pixel type": header.dtype},
-                **{"header calibration": f"{cal.pixel_size_x}, {cal.pixel_size_z} µm; "
-                   f"{cal.frame_interval} min"},
+                **{"header calibration": f"X {cal.pixel_size_x}, Y {cal.pixel_size_y}, "
+                   f"Z {cal.pixel_size_z} µm; {cal.frame_interval} min"},
             )  # fmt: skip
         except InputError as error:
             row["problem"] = str(error)

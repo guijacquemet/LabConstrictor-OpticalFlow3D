@@ -21,7 +21,7 @@ from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec
 from .config import to_record as record
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import dictionary_records, frame_dictionary
-from .flow_backend import flow_identity, run_flow, upstream_identity
+from .flow_backend import correction_identity, flow_identity, run_flow, upstream_identity
 from .flow_features import frame_features, velocity_scale
 from .flow_store import FlowResult, open_result, verify_result
 from .foreground import describe, threshold_frame
@@ -31,17 +31,21 @@ from .progress import Tracker
 from .results import (
     claim_run,
     environment,
+    feature_implementation,
     implementation_identity,
     now,
     relative,
     write_csv,
     write_json,
+    write_json_new,
 )
 from .temporal_features import aggregate_fov, fov_dictionary
 from .validation import (
     InputError,
+    calibration_issues,
     check_calibration,
     check_feature_settings,
+    check_sigmas,
     check_time_and_depth,
     raise_for_errors,
     resolve_flow_mode,
@@ -189,10 +193,11 @@ def frame_rows(
                 settings.features,
             )
             recorded = result.manifest.get("outputs", [{}] * (index + 1))[index]
+            current = brightness_qc_current(result)
             features.put(
                 "qc_brightness_change_per_frame",
-                recorded.get("brightness_change_per_frame"),
-                brightness_reason(recorded),
+                recorded.get("brightness_change_per_frame") if current else None,
+                brightness_reason(recorded) if current else STALE_BRIGHTNESS_QC,
             )
             row: dict[str, object] = {
                 "fov_uid": result.name,
@@ -211,6 +216,22 @@ def frame_rows(
     return rows
 
 
+STALE_BRIGHTNESS_QC = (
+    "not reused: the reused optical flow recorded its brightness QC with another brightness "
+    "implementation (the velocities do not depend on it; recompute the flow to measure it)"
+)
+
+
+def brightness_qc_current(result: FlowResult) -> bool:
+    """Return whether a flow result's brightness QC was measured by the current implementation.
+
+    The brightness trend is measured even without correction, by code that is not part of the
+    velocity identity; reused velocities stay valid, their brightness QC only when the
+    recorded implementation is the current one (round 3).
+    """
+    return result.manifest.get("brightness_qc") == correction_identity()
+
+
 def brightness_reason(recorded: dict[str, object]) -> str:
     """Return why an output's recorded brightness change has no value (m6)."""
     if "brightness_change_per_frame" not in recorded:
@@ -222,6 +243,8 @@ def brightness_reason(recorded: dict[str, object]) -> str:
 
 def brightness_warning(result: FlowResult, equalised: bool) -> str:
     """Return a warning when the global brightness changes markedly, or an empty string."""
+    if not brightness_qc_current(result):
+        return "Brightness QC not reused: " + STALE_BRIGHTNESS_QC + "."
     changes = [
         abs(o["brightness_change_per_frame"])
         for o in result.manifest.get("outputs", [])
@@ -405,6 +428,9 @@ def write_feature_tables(
             "frame_identifier_columns": list(FRAME_ID_COLUMNS),
             "frame_features": dictionary_records(defs),
             "fov_features": dictionary_records(fov_dictionary(defs)),
+            "feature_implementation": feature_implementation(
+                dictionary_records(defs) + dictionary_records(fov_dictionary(defs))
+            ),
         },
     )
     return per_fov
@@ -421,6 +447,8 @@ def checked_settings(settings: RunSettings, flow_only: bool = False) -> RunSetti
         For invalid feature or foreground settings, an invalid object-set name, or 3D speed
         with per-slice 2D optical flow.
     """
+    # Before a run folder is claimed: sigmas (tSig=0) and a calibration built in Python.
+    raise_for_errors(check_sigmas(settings.flow) + calibration_issues(settings.calibration))
     settings = replace(settings, flow=resolve_flow_mode(settings.flow, settings.calibration))
     if not flow_only:
         raise_for_errors(check_feature_settings(settings.features, settings.foreground))
@@ -525,5 +553,5 @@ def run_experiment(
             "tables": "CSV, UTF-8, NaN as empty cell",
         },
     }
-    write_json(run_dir / "run_manifest.json", manifest)
+    write_json_new(run_dir / "run_manifest.json", manifest)  # never replaces one (round 4)
     return manifest

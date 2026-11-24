@@ -179,7 +179,7 @@ class FeatureSettings:
         the fraction of moving regions undefined.
     angle_bins
         Angular resolution of the XY angular entropy: its kernel's standard deviation is
-        ``360° / angle_bins`` (10° by default).
+        ``360° / angle_bins`` (10° by default; 2 to 360, the finest the entropy grid resolves).
     aligned_angle_deg
         Vectors within this angle of the dominant direction count as aligned.
     min_direction_speed

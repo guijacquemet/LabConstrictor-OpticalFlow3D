@@ -90,7 +90,7 @@ upstream returns them) or float32 if you choose so; the reliability is saved as 
 |---|---|---|
 | `xyz` | `calc_flow3D` on each window of Z-stacks | `vx`, `vy`, `vz`, `rel` |
 | `xy_per_slice` | `calc_flow2D` on each Z slice separately (same `xyzSig`, `tSig`, `wSig`); the slices are stacked again | `vx`, `vy`, `rel` (no `vz`) |
-| `auto` (default) | `xy_per_slice` when `Z spacing / XY pixel size > 3`, otherwise `xyz` | as the resolved mode |
+| `auto` (default) | `xy_per_slice` when `Z spacing / X pixel size > 3`, otherwise `xyz` (the X size stands for XY: X and Y sampling are assumed similar) | as the resolved mode |
 
 `auto` needs the X pixel size and the Z spacing; without them it stops with a message asking you
 to enter them or to choose a mode. The resolved mode is what is recorded in the run and flow
@@ -245,10 +245,17 @@ xy_angular_entropy = (H − H_kernel) / (log 2π − H_kernel)      clipped to [
 ```
 
 Because entropy is concave, `H` always lies between these two limits. There are no histogram bins,
-edges or anchor angle, so rotating every vector leaves the value unchanged, and moving one vector
-a little changes the value a little. Numerically, the density is evaluated on 65,536 points of the
+edges or anchor angle, so for the continuous density rotating every vector leaves the value
+unchanged, and moving one vector a little changes the value a little; the numerical value follows
+this within the measured error given below. Numerically, the density is evaluated on 65,536 points of the
 circle (each direction is spread linearly between its two nearest points), the kernel is applied
-by FFT, and the integral is a trapezoid sum.
+by FFT, and the integral is a trapezoid sum. The concavity bound holds for the continuous
+density; the grid computation follows it within its numerical error, which was measured: with
+`angle_bins` up to 360 (a 1° kernel, the largest allowed), a single direction placed anywhere on
+the grid gives at most 8.4 × 10⁻⁷ instead of 0, and rotations changed the value by at most
+1.5 × 10⁻⁷ in our tests and 2.5 × 10⁻⁷ in an independent sweep of 300 rotations (Python 3.11 and
+NumPy 2.2.6; Python 3.13 and NumPy 2.3.5): always below the tested tolerance of 10⁻⁶. These are
+the largest values found by sampling, not proven bounds. Finer kernels are not resolved by the grid and are refused (`angle_bins_too_large`).
 
 ### 5.4 Spatial heterogeneity → [glossary](features.md#spatial-heterogeneity)
 
@@ -331,7 +338,7 @@ brightness_change_per_frame = (least-squares slope of m_j against j) / m_central
 
 so 0.05 means brightening by 5 % of the central brightness per frame. It is undefined when the
 central mean is not above 0. It is saved for every output (`flow_manifest.json` and
-`qc_brightness_change_per_frame`). A field of view whose change exceeds **0.02 (2 %) per frame**
+`qc_brightness_change_per_frame`). A field of view whose absolute change exceeds **0.02 (2 %) per frame** (brightening or dimming)
 in any output gets a warning in `fovs.csv`.
 
 **Optional correction** (`flow.brightness_equalisation`, off by default):

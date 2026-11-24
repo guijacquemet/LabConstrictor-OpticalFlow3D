@@ -119,7 +119,20 @@ def test_resource_estimate_full_size_dataset(tmp_path):
     assert 10e9 < estimate.peak_ram_bytes < 12e9
     assert estimate.output_bytes == 9 * 11 * 1840 * 1840 * 28
     per_slice = estimate_resources(dims, 2, FlowParameters(mode="xy_per_slice"), tmp_path)
-    assert per_slice.output_bytes == 9 * 11 * 1840 * 1840 * 20  # no vz in per-slice mode
+    assert per_slice.output_bytes == 9 * 11 * 1840 * 1840 * 24  # no vz; float64 reliability
+
+
+@pytest.mark.parametrize("mode", ["xyz", "xy_per_slice"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_output_estimate_matches_the_arrays_actually_returned(mode, dtype):
+    # Round 3: the per-slice estimate assumed 4-byte reliability; calc_flow2D gives float64.
+    from opticalflow3d_profiler.flow_backend import compute_frame, output_bytes_per_voxel
+
+    params = FlowParameters(mode=mode, output_dtype=dtype)
+    window = np.random.default_rng(0).random((params.window_length, 4, 24, 24))
+    arrays = compute_frame(window, params)
+    voxels = 4 * 24 * 24
+    assert sum(a.nbytes for a in arrays.values()) == voxels * output_bytes_per_voxel(params)
 
 
 def test_upstream_licence_ships_with_the_python_files():
@@ -156,6 +169,15 @@ def test_correction_code_identity_invalidates_cached_corrected_flow(flow_run, mo
             after = flow_backend.flow_identity(spec, header, corrected, source)
         assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
     assert "commit" not in before["brightness_correction"]  # a wheel install has none
+    # Round 3: a change of flow_window, which applies the correction, changes it too.
+    real = flow_backend.inspect.getsource
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            flow_backend.inspect, "getsource",
+            lambda obj: real(obj) + "# edited" if obj is flow_backend.flow_window else real(obj),
+        )  # fmt: skip
+        after = flow_backend.flow_identity(spec, header, corrected, source)
+    assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
 
 
 def test_a_failing_window_closes_progress_and_removes_the_partial_folder(
@@ -236,3 +258,53 @@ def test_a_failure_up_to_publication_removes_only_the_partial_folder(
                  flow / "f", "f")  # fmt: skip
     assert sorted(p.name for p in flow.iterdir()) == ["other"]
     assert (flow / "other" / "keep.txt").read_text() == "unrelated"
+
+
+def test_each_flow_run_owns_its_temporary_folder(tmp_path, imagej_file, monkeypatch):
+    # Round 3: the partial folder was named by PID only, so a stale or concurrent one could be
+    # taken over and then deleted by the cleanup.
+    import os
+
+    from opticalflow3d_profiler import flow_backend
+
+    path, _ = imagej_file
+    flow = tmp_path / "flow"
+    stale = flow / f"f.partial-{os.getpid()}"
+    stale.mkdir(parents=True)
+    (stale / "other.txt").write_text("not ours")
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(flow_backend.tifffile, "imwrite", fail)
+    with pytest.raises(OSError, match="disk full"):
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"),
+                 flow / "f", "f")  # fmt: skip
+    assert (stale / "other.txt").read_text() == "not ours"
+    assert sorted(p.name for p in flow.iterdir()) == [stale.name]
+
+
+def test_identity_changes_name_the_changed_entry_of_a_list():
+    from opticalflow3d_profiler.flow_store import identity_changes
+
+    old = {"frame_map": [{"source_frame": t} for t in range(3, 50)], "parameters": {"w_sig": 4}}
+    new = {"frame_map": [{"source_frame": t} for t in range(3, 50)], "parameters": {"w_sig": 4}}
+    new["frame_map"][10]["source_frame"] = 99
+    assert identity_changes(old, new) == ["frame_map[10].source_frame: 13 → 99"]
+    new["frame_map"] = new["frame_map"][:5]
+    assert identity_changes(old, new) == ["frame_map: 47 entries → 5"]
+
+
+def test_flow_folders_follow_the_process_umask(tmp_path, imagej_file):
+    # Round 4: the temporary folder was made world-readable (chmod 0o755) whatever the umask.
+    import os
+    import stat
+
+    path, _ = imagej_file
+    old = os.umask(0o077)
+    try:
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"),
+                 tmp_path / "flow" / "f", "f")  # fmt: skip
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE((tmp_path / "flow" / "f").stat().st_mode) & 0o077 == 0

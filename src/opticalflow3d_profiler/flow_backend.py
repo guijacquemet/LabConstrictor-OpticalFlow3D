@@ -10,11 +10,13 @@ and published with one rename, so an interrupted run leaves no half-written resu
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import shutil
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +39,7 @@ from .image_io import ImageHeader, dimensions, file_identity, read_frames, valid
 from .progress import Stage, Tracker
 from .validation import (
     InputError,
+    check_sigmas,
     check_time_and_depth,
     output_frame_map,
     raise_for_errors,
@@ -119,6 +122,19 @@ def available_memory() -> int | None:
         return None
 
 
+def output_bytes_per_voxel(params: FlowParameters) -> int:
+    """Return the written bytes per voxel of one output, by the arrays compute_frame returns.
+
+    Velocities are in ``output_dtype``. Reliability is upstream's: float32 from 3-D
+    ``calc_flow3D``, float64 from per-slice ``calc_flow2D`` (not cast). An unresolved
+    ``auto`` mode counts the larger, 3-D velocities with float64 reliability.
+    """
+    velocity = np.dtype(params.output_dtype).itemsize
+    if params.mode == "xy_per_slice":
+        return 2 * velocity + 8
+    return 3 * velocity + (4 if params.mode == "xyz" else 8)
+
+
 def estimate_resources(
     dims: dict[str, int], itemsize: int, params: FlowParameters, output_dir: Path
 ) -> ResourceEstimate:
@@ -140,17 +156,16 @@ def estimate_resources(
     ResourceEstimate
         The estimate.
     """
+    raise_for_errors(check_sigmas(params))  # tSig=1e300 would give an absurd window (round 4)
     voxels = dims["Z"] * dims["Y"] * dims["X"]
     n_out = len(output_frame_map(dims["T"], params))
-    out_item = np.dtype(params.output_dtype).itemsize
     existing = Path(output_dir)
     while not existing.exists():
         existing = existing.parent
     return ResourceEstimate(
         peak_ram_bytes=voxels * (BYTES_PER_VOXEL_PEAK + params.window_length * itemsize),
         available_ram_bytes=available_memory(),
-        # vx, vy (and vz except per slice; 'auto' unresolved counts it) plus reliability
-        output_bytes=n_out * voxels * ((2 if params.mode == "xy_per_slice" else 3) * out_item + 4),
+        output_bytes=n_out * voxels * output_bytes_per_voxel(params),
         free_disk_bytes=shutil.disk_usage(existing).free,
         n_outputs=n_out,
         seconds=n_out * voxels * SECONDS_PER_VOXEL,
@@ -217,7 +232,7 @@ def flow_identity(
         "upstream": upstream_identity(),
         "frame_map": output_frame_map(dims["T"], params),
         **(
-            {"brightness_correction": implementation_identity()}
+            {"brightness_correction": correction_identity()}
             if params.brightness_equalisation != "none"
             else {}
         ),
@@ -271,6 +286,20 @@ def compute_frame(window: np.ndarray, params: FlowParameters) -> dict[str, np.nd
         "vz": vz.astype(dtype, copy=False),
         "rel": rel,
     }
+
+
+def correction_identity() -> dict[str, str | None]:
+    """Return the identity of the code that measures and corrects a window's brightness.
+
+    Used for the corrected-flow identity and for the brightness QC recorded with every flow
+    (which :func:`flow_window` measures even without correction).
+
+    :func:`brightness.implementation_identity` (normalization version, ``time_series`` and
+    ``brightness.py``) plus the SHA-256 of :func:`flow_window`, which decides when and how
+    the correction is applied (round 3: a changed caller kept the cached corrected flow).
+    """
+    caller = inspect.getsource(flow_window).encode("utf-8")
+    return {**implementation_identity(), "flow_window_sha256": hashlib.sha256(caller).hexdigest()}
 
 
 def flow_window(window: np.ndarray, params: FlowParameters) -> tuple[dict, dict[str, object]]:
@@ -383,8 +412,12 @@ def run_flow(
     report(f"Hashing {spec.path.name} (source identity)...")
     source = file_identity(spec.path)
     identity = flow_identity(spec, header, params, source)
-    partial = out_dir.with_name(out_dir.name + f".partial-{os.getpid()}")
-    partial.mkdir(parents=True)
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Created exclusively (mkdir fails if it exists) with a unique name: this call owns it, so
+    # the cleanup below never removes another thread's, process's or attempt's folder (round 3).
+    # mkdir applies the process umask, so permissions are the deployment's own (round 4).
+    partial = out_dir.with_name(f"{out_dir.name}.partial-{uuid.uuid4().hex}")
+    partial.mkdir()
     started = time.monotonic()
     stage = (tracker or Tracker()).stage(
         f"Optical flow {name}", len(identity["frame_map"]), nested=True
@@ -423,6 +456,7 @@ def _flow_manifest(
         "outputs": outputs,
         "velocity_units": {"vx": "pixel/frame", "vy": "pixel/frame", "vz": "slice/frame"},
         "reliability": "smallest eigenvalue of the Lucas-Kanade structure tensor (upstream)",
+        "brightness_qc": correction_identity(),  # flow_window measures it (round 4)
         "application_version": __version__,
         "python": sys.version.split()[0],
         "numpy": np.__version__,

@@ -14,6 +14,7 @@ section's output area, never as tracebacks.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,9 +81,17 @@ def text(description: str, value: str = "", placeholder: str = "") -> widgets.Te
 
 
 def number(value: str) -> float | None:
-    """Return a float from a text field, ``None`` when empty."""
+    """Return a finite float from a text field, ``None`` when empty.
+
+    'nan', 'inf' and '-inf' are refused (round 4): they would silently select nothing.
+    """
     value = value.strip()
-    return float(value) if value else None
+    if not value:
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise InputError(f"'{value}' is not a finite number; enter an ordinary number.")
+    return parsed
 
 
 def guarded(output: widgets.Output, action: Callable[[], None]) -> Callable:
@@ -177,8 +186,9 @@ class LoadStep:
         """Discover the experiment, show its design and an example image's header."""
         if not self.experiment.value.strip() or not self.results.value.strip():
             raise InputError("Give the experiment folder and the results folder.")
-        root = Path(self.experiment.value.strip()).resolve()
-        results = Path(self.results.value.strip()).resolve()
+        # Paths are used as typed: a folder name may end with a space (m1, round 3).
+        root = Path(self.experiment.value).resolve()
+        results = Path(self.results.value).resolve()
         if results.is_relative_to(root):
             raise InputError("The results folder must be outside the experiment folder.")
         metadata = read_experiment_folder(root)

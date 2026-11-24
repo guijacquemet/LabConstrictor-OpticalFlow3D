@@ -312,6 +312,12 @@ def test_a_run_label_never_equals_another_runs_folder_name(tmp_path):
     assert labels[first] == generated == run_labels([first])[first]  # stable for one run
     with pytest.raises(InputError, match="same run folder"):
         run_labels([first, tmp_path / "seriesA" / "x" / ".." / "run-1"])
+    with pytest.raises(InputError, match="same run folder"):
+        run_labels([first, first])  # round 3: the same Path twice was silently collapsed
+    first.mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(first)
+    with pytest.raises(InputError, match="same run folder"):
+        run_labels([first, tmp_path / "alias" / "."])  # a link to the same folder
 
 
 def test_repeated_or_shadowed_feature_columns_are_refused(experiment, tmp_path):
@@ -353,6 +359,7 @@ def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
 
 
 def test_an_interrupted_or_concurrent_run_is_never_entered_again(experiment, tmp_path):
+    import threading
     from concurrent.futures import ThreadPoolExecutor
 
     from opticalflow3d_profiler.results import claim_run
@@ -366,8 +373,10 @@ def test_an_interrupted_or_concurrent_run_is_never_entered_again(experiment, tmp
         run_experiment(one, settings(), interrupted)
     assert not (interrupted / "run_manifest.json").exists()
     race = create_run(tmp_path, "race")
+    start = threading.Barrier(8)  # all threads claim at the same moment
 
     def attempt(_):
+        start.wait()
         try:
             claim_run(race)
             return True
@@ -403,6 +412,14 @@ def test_default_readout_is_a_feature_with_values(experiment):
     axial = FeatureDef(speed_3d, "magnitude", "", "", "lateral", "fov", "", AXIAL, "")
     undefined = replace_set(features, table=table, fov_defs=[axial, *features.fov_defs])
     assert default_readout(undefined) == SPEED
+    # Round-3 docs audit: without any speed median, an axial statistic (vz_sd) came first.
+    no_speed = [d for d in undefined.fov_defs if "speed_xy" not in d.name]
+    vz = FeatureDef("Nuclei__vz_sd", "components", "", "", "axial", "fov", "", AXIAL, "")
+    table = undefined.table.assign(**{"Nuclei__vz_sd": 0.1})
+    xyz = replace_set(undefined, table=table, fov_defs=[vz, *no_speed])
+    chosen = default_readout(xyz)
+    assert chosen != "Nuclei__vz_sd"
+    assert next(d for d in xyz.fov_defs if d.name == chosen).applicability != AXIAL
 
 
 def test_the_report_server_serves_only_files_inside_its_folder(tmp_path):
@@ -448,3 +465,169 @@ def test_shared_repeat_labels_are_named_for_the_user():
         {"run": ["A", "B", "A", "B"], "biological_repeat": ["r1", "r1", "r2", "r3"]}
     )
     assert shared_repeats(table) == {"r1": ["A", "B"]}
+
+
+def test_invalid_sigmas_are_refused_before_a_run_folder_is_claimed(experiment, tmp_path):
+    from opticalflow3d_profiler.pipeline import checked_settings
+
+    _, metadata, _, _ = experiment
+    bad = settings(flow=FlowParameters(mode="xyz", t_sig=0))
+    with pytest.raises(InputError, match="invalid_sigma|positive numbers"):
+        checked_settings(bad)
+    run = create_run(tmp_path, "sigma")
+    with pytest.raises(InputError):
+        run_experiment(metadata.iloc[:1], bad, run)
+    assert not (run / "run_started.json").exists()  # the folder stays usable
+
+
+def test_refusing_a_finished_run_never_writes_into_it(tmp_path):
+    # Round 3: a run older than the claim (manifest, no run_started.json) got an empty claim.
+    from opticalflow3d_profiler.results import claim_run
+
+    legacy = create_run(tmp_path, "legacy")
+    (legacy / "run_manifest.json").write_text("{}")
+    before = sorted(p.name for p in legacy.iterdir())
+    with pytest.raises(InputError, match="never run twice"):
+        claim_run(legacy)
+    assert sorted(p.name for p in legacy.iterdir()) == before
+
+
+def _edit_dictionary(run, edit):
+    path = run / "features" / "feature_dictionary.json"
+    info = json.loads(path.read_text())
+    edit(info)
+    path.write_text(json.dumps(info))
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda i: i["feature_implementation"].update(code_sha256="0" * 64), "feature code"),
+        (lambda i: i["fov_features"][0].update(applicability="orientation"), "definitions"),
+        (lambda i: i.pop("feature_implementation"), "extracted before"),
+    ],
+    ids=["other code", "other definition", "older run"],
+)
+def test_runs_with_other_feature_definitions_or_code_are_never_combined(
+    experiment, tmp_path, edit, message
+):
+    # Round 3: old binned and new kernel entropy (and the vx_*/vy_* reclassification) had one
+    # name and unit, so runs of both were combined into one MorphoCoverage analysis.
+    from opticalflow3d_profiler.results import feature_implementation
+
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    b = _copy_run(run, tmp_path / "b", "b-")
+    load_runs([a, b])  # the same version: combined
+
+    def redo(info):  # an edited definition gets a new definitions hash, as a real one would
+        edit(info)
+        if "feature_implementation" in info and message == "definitions":
+            records = info["frame_features"] + info["fov_features"]
+            info["feature_implementation"] = feature_implementation(records)
+
+    _edit_dictionary(b, redo)
+    with pytest.raises(InputError, match=message):
+        load_runs([a, b])
+    load_runs([b])  # alone, a run is never combined with anything
+
+
+def test_a_dictionary_describing_a_feature_twice_is_refused(experiment, tmp_path):
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    _edit_dictionary(a, lambda i: i["fov_features"].append(i["fov_features"][0]))
+    with pytest.raises(InputError, match="twice"):
+        load_runs([a])
+
+
+def test_reused_flow_keeps_its_velocities_but_not_stale_brightness_qc():
+    # Round 3: the brightness trend is measured without correction too, by code outside the
+    # velocity identity; reused flow must not carry QC of another implementation.
+    from types import SimpleNamespace
+
+    from opticalflow3d_profiler.flow_backend import correction_identity
+    from opticalflow3d_profiler.pipeline import brightness_qc_current, brightness_warning
+
+    outputs = [{"brightness_change_per_frame": 0.5}]
+    current = SimpleNamespace(manifest={"brightness_qc": correction_identity(),
+                                        "outputs": outputs})  # fmt: skip
+    other = SimpleNamespace(manifest={"brightness_qc": {"version": "0.7.1"}, "outputs": outputs})
+    assert brightness_qc_current(current) and not brightness_qc_current(other)
+    assert "changes by up to 50.0%" in brightness_warning(current, equalised=False)
+    assert brightness_warning(other, equalised=False).startswith("Brightness QC not reused")
+
+
+@pytest.mark.parametrize(
+    "name", ["../experiment/rogue-run", "a/b", "/tmp/elsewhere", "..", " padded", "x\\y", "link"]
+)
+def test_run_and_report_names_never_lead_outside_their_folder(tmp_path, name):
+    # Round 4: '../experiment/rogue-run' created a run folder inside the experiment.
+    from opticalflow3d_profiler.results import contained
+
+    results, experiment = tmp_path / "results", tmp_path / "experiment"
+    results.mkdir()
+    experiment.mkdir()
+    (results / "link").symlink_to(experiment)  # a link inside results pointing out of it
+    with pytest.raises(InputError, match="plain folder name|leads outside"):
+        create_run(results, name)
+    with pytest.raises(InputError, match="plain folder name|leads outside"):
+        contained(results, name, "report name")
+    assert sorted(p.name for p in experiment.iterdir()) == []
+    assert create_run(results, "run-ok").parent == results
+
+
+def test_an_edited_dictionary_is_refused_even_with_its_old_hash(experiment, tmp_path):
+    # Round 4: a definition changed without updating the stored hash was still combined.
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    b = _copy_run(run, tmp_path / "b", "b-")
+    _edit_dictionary(b, lambda i: i["fov_features"][0].update(formula="something else"))
+    with pytest.raises(InputError, match="do not match their recorded hash"):
+        load_runs([a, b])
+    with pytest.raises(InputError, match="do not match their recorded hash"):
+        load_runs([b])
+
+
+def test_the_feature_identity_covers_the_velocity_code_and_normalization():
+    from opticalflow3d_profiler.results import FEATURE_MODULES, feature_implementation
+
+    for module in ("flow_backend.py", "image_io.py", "_upstream/calc_flow.py"):
+        assert module in FEATURE_MODULES
+    assert "time_series_sha256" in feature_implementation([])["normalization"]
+
+
+def test_reusing_flow_after_a_change_of_flow_window_leaves_brightness_qc_empty(
+    experiment, monkeypatch
+):
+    # Round 4: brightness QC is measured in flow_window; a changed flow_window kept old QC.
+    from opticalflow3d_profiler import flow_backend
+
+    root, metadata, run, _ = experiment
+    one = metadata[metadata["position_id"] != "broken"].iloc[:1]
+    real = flow_backend.inspect.getsource
+    monkeypatch.setattr(
+        flow_backend.inspect, "getsource",
+        lambda obj: real(obj) + "# edited" if obj is flow_backend.flow_window else real(obj),
+    )  # fmt: skip
+    new = create_run(root / "results", "run-after-edit")
+    manifest = run_experiment(one, settings(), new, reuse_from=run)
+    assert manifest["fovs"][0]["flow_origin"].startswith("reused")  # velocities still valid
+    frames = pd.read_csv(new / "features" / "features_per_frame.csv")
+    assert frames["qc_brightness_change_per_frame"].isna().all()
+    assert frames["undefined_features"].str.contains("not reused").all()
+    assert "Brightness QC not reused" in manifest["fovs"][0]["warnings"]
+
+
+def test_a_manifest_published_meanwhile_is_never_replaced(tmp_path):
+    # Round 4: a manifest written after the claim's second check could be replaced.
+    from opticalflow3d_profiler.results import write_json_new
+
+    target = tmp_path / "run_manifest.json"
+    target.write_text('{"kind": "someone else"}')
+    with pytest.raises(InputError, match="not replaced"):
+        write_json_new(target, {"kind": "ours"})
+    assert json.loads(target.read_text()) == {"kind": "someone else"}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["run_manifest.json"]  # no temp left
+    fresh = tmp_path / "new.json"
+    write_json_new(fresh, {"a": 1})
+    assert json.loads(fresh.read_text()) == {"a": 1}

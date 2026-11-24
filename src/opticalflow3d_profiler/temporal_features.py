@@ -50,7 +50,8 @@ def fov_dictionary(frame_defs: list[FeatureDef]) -> list[FeatureDef]:
                 "fov",
                 d.requires,
                 d.applicability,
-                f"no defined frame (or angles without a mean direction); frame: {d.undefined}",
+                "no defined frame (or, for angles, a mean resultant below 1e-12); frame: "
+                f"{d.undefined}",
             )
         )
     return out

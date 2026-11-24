@@ -34,7 +34,7 @@ from .analysis import FeatureSet
 from .feature_dictionary import AXIAL, BIOLOGICAL, FeatureDef
 from .naming import find_column
 from .progress import Tracker
-from .results import distribution_identity, now, write_json
+from .results import contained, distribution_identity, now, write_json
 from .validation import InputError
 
 KEY = ("condition", "biological_repeat", "technical_repeat", "position_id")
@@ -90,10 +90,13 @@ def is_declared_feature(definition: FeatureDef, include_axial: bool) -> bool:
 
 
 def default_readout(features: FeatureSet) -> str:
-    """Return the default readout: the median speed (3D when defined, else XY).
+    """Return the default readout: a speed with values, lateral before any axial feature.
 
-    Only a column with values counts (3D speed is undefined without full calibration); with
-    neither, the first feature with values, so the choice is always one the design accepts.
+    In order: the 3D median speed, the XY median speed, the mean lateral speed (3D speed mode
+    without full calibration has no speed family), then the first lateral (non-axial) feature
+    with values, then any feature with values. Only a column with values counts, so the
+    choice is always one the design accepts, and an experimental axial statistic is chosen
+    only when nothing else has values (round-3 documentation audit).
 
     Raises
     ------
@@ -101,13 +104,14 @@ def default_readout(features: FeatureSet) -> str:
         When no feature has values.
     """
     candidates, _ = feature_columns(features, include_axial=True)
-    for key in ("speed_3d_median", "speed_xy_median"):
+    for key in ("speed_3d_median", "speed_xy_median", "lateral_speed_mean"):
         found = find_column(candidates, key)
         if found is not None:
             return found
-    if not candidates:
-        raise InputError("No feature has values in these results; nothing can be compared.")
-    return candidates[0]
+    lateral, _ = feature_columns(features, include_axial=False)
+    if lateral or candidates:
+        return (lateral or candidates)[0]
+    raise InputError("No feature has values in these results; nothing can be compared.")
 
 
 def feature_columns(features: FeatureSet, include_axial: bool) -> tuple[list[str], list[str]]:
@@ -217,7 +221,7 @@ def run_report(
     from morphocoverage.workflows import report, scan_design
     from morphocoverage.workflows.html_report import html_report
 
-    out_dir = Path(out_dir)
+    out_dir = contained(Path(out_dir).parent, Path(out_dir).name, "report folder name")
     if out_dir.exists():
         raise InputError(f"{out_dir} exists; reports are never overwritten.")
     data = coverage_input(features, design)

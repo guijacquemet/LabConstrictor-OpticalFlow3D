@@ -14,7 +14,7 @@ There are three ways to run the OpticalFlow3D Profiler. They all run the same no
 
 | Option | Best for | Platforms |
 |---|---|---|
-| [Desktop app (installer)](#option-1-desktop-app-labconstrictor-installer) | Everyday use on your own computer, offline after installation | **Linux x86-64 only** is built and tested |
+| [Desktop app (installer)](#option-1-desktop-app-labconstrictor-installer) | Everyday use on your own computer, offline after installation | **Linux x86-64 only** is built (each release is tested before publication) |
 | [Google Colab](#option-2-google-colab) | Trying the app without installing anything | Any browser |
 | [Python from the repository](#option-3-python-from-the-repository) | Developers, servers, other operating systems | Python 3.11 |
 
@@ -23,8 +23,9 @@ There are three ways to run the OpticalFlow3D Profiler. They all run the same no
 - **Memory:** the optical flow is memory hungry. Plan about **11–12 GB of RAM** for an
   1840 × 1840 × 11 Z-stack (measured on a 4-vCPU machine). The notebook estimates memory, disk and
   time for your own images before you process them ([Workflow](workflow.md#estimate-resources)).
-- **Disk:** about 9.4 GB of float64 optical-flow output per 1840 × 1840 × 11 × 15 field of view
-  (4.7 GB if you choose float32).
+- **Disk:** about 9.4 GB of optical-flow output per 1840 × 1840 × 11 × 15 field of view with
+  float64 velocities, 5.4 GB with float32 (the reliability volume keeps the upstream's precision:
+  float32 in 3D, float64 per slice, so per-slice outputs are about 8.0 GB or 5.4 GB).
 - **No GPU** is used, and none is needed.
 
 ### Option 1: desktop app (LabConstrictor installer)
@@ -48,8 +49,9 @@ desktop installer that sets up Python, JupyterLab and every dependency.
 4. Run the Welcome notebook's cell and click **Open the notebook** next to
    `OpticalFlow3D_Profiler`. More detail: [Open and use an app](../.tools/docs/notebook_usage.md).
 
-> **Platforms.** Only the Linux x86-64 installer is built and tested (`distribution.platforms:
-> [linux-x86_64]` in `labconstrictor-app.yaml`). The code is pure Python and should run on
+> **Platforms.** Only the Linux x86-64 installer is built (`distribution.platforms:
+> [linux-x86_64]` in `labconstrictor-app.yaml`). Release 0.1.0 was installed and run on Linux;
+> every new release is tested again before it is published. The code is pure Python and should run on
 > Windows and macOS, but those installers are not built. On those systems, use
 > [Google Colab](#option-2-google-colab) or [Python](#option-3-python-from-the-repository).
 
@@ -134,9 +136,12 @@ commit when installed from Git) in `run_manifest.json` ([Outputs](results.md#run
 
 The app reads a **MorphoBricks experiment folder**: the folder names give the condition and the
 repeats, and each image is one field of view. This page explains the layout, the image format,
-and how axes and calibration are confirmed. Everything here is checked **before** any
-computation. When something is wrong, the app stops with a message that names the problem; it
-never guesses.
+and how axes and calibration are confirmed. The folder layout and every image **header** (axes,
+shape, pixel type, header calibration) are checked **before** any computation; what depends on
+an image's length and the chosen optical-flow settings (for example enough time points for
+`tSig`) is checked per field of view when it is processed, and a failing field of view is
+recorded as failed, never skipped silently. When something is wrong, the app stops with a message
+that names the problem; it never guesses.
 
 ### 1. Folder layout
 
@@ -226,8 +231,9 @@ pixel type, number of series, file size, calibration, notes). You then type the 
   `(not named: confirm)`.
 - **An axis the header names keeps its role.** You may only choose the role of axes the header
   leaves unknown (tifffile shows them as `Q` or `I`). If the header says `ZCYX` you cannot confirm
-  `TZYX`: Z planes read as time points would give false velocities. The refusal starts with
-  `axes_contradict_header`. Fix the file's metadata instead (for example, re-save it in Fiji with
+  `TZYX`: Z planes read as time points would give false velocities. An axis the header names with
+  any other letter (`E`, `H`, `A`, `R`, `0`, …) is a dimension the app does not analyse, so such a
+  file is refused too. The refusal starts with `axes_contradict_header`. Fix the file's metadata instead (for example, re-save it in Fiji with
   the correct hyperstack dimensions).
 - One axis order is confirmed for the **whole run**. On **Confirm**, every image header of the
   experiment is checked against it (headers only, no pixels read). If any image cannot be

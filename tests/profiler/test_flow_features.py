@@ -231,8 +231,9 @@ def test_angular_entropy_is_rotation_invariant_on_and_near_bin_edges(rotation_de
     assert 0 < reference < 1
     turned = TWO_STREAMS + np.deg2rad(rotation_deg)
     assert angular_entropy(turned, 36) == pytest.approx(reference, abs=1e-6)
-    for ulps in (1, 2):  # one or two ULPs off the rotated positions
-        nudged = np.nextafter(turned, turned + ulps)
+    nudged = turned
+    for _ in range(2):  # one, then two ULPs off the rotated positions
+        nudged = np.nextafter(nudged, np.inf)
         assert angular_entropy(nudged, 36) == pytest.approx(reference, abs=1e-6)
 
 
@@ -255,3 +256,40 @@ def test_angular_entropy_is_defined_for_a_prime_resolution():
     value = angular_entropy(streams, 37)
     assert 0 < value < 1
     assert angular_entropy(streams + 0.123, 37) == pytest.approx(value, abs=1e-6)
+
+
+@pytest.mark.parametrize("bins", [36, 360])
+def test_angular_entropy_holds_its_tolerance_up_to_the_finest_resolution(bins):
+    # Round 3: at 10,000 bins the 2**16 grid no longer resolved the kernel (errors ~3e-4).
+    from opticalflow3d_profiler import flow_features
+
+    step = 2 * np.pi / flow_features.ENTROPY_GRID
+    for phase in (0.0, 0.25, 0.5):  # one direction on, near and halfway between grid points
+        assert angular_entropy(np.full(40, phase * step), bins) == pytest.approx(0.0, abs=1e-6)
+    reference = angular_entropy(TWO_STREAMS, bins)
+    for turn in np.random.default_rng(3).uniform(0, 2 * np.pi, 20):
+        assert angular_entropy(TWO_STREAMS + turn, bins) == pytest.approx(reference, abs=1e-6)
+    sigma = 2 * np.pi / bins
+    order = np.arange(flow_features.ENTROPY_GRID // 2 + 1)
+    mass = flow_features._grid_mass(np.full(1, 0.5 * step))
+    spectrum = np.fft.rfft(mass) * np.exp(-0.5 * (order * sigma) ** 2)
+    assert np.fft.irfft(spectrum, flow_features.ENTROPY_GRID).min() > -1e-12  # round-off only
+
+
+def test_angular_entropy_refuses_unresolved_resolutions():
+    from opticalflow3d_profiler.config import ForegroundSpec
+    from opticalflow3d_profiler.validation import check_feature_settings
+
+    with pytest.raises(ValueError, match="outside 2..360"):
+        angular_entropy(TWO_STREAMS, 361)
+    issues = check_feature_settings(FeatureSettings(angle_bins=10_000), ForegroundSpec())
+    assert "angle_bins_too_large" in {i.code for i in issues}
+
+
+def test_angular_entropy_refuses_empty_or_non_finite_directions():
+    # Round 4: [] and [NaN] returned a plausible-looking 0.15.
+    for bad in (np.array([]), np.array([np.nan]), np.array([0.1, np.inf])):
+        with pytest.raises(ValueError, match="finite direction"):
+            angular_entropy(bad, 36)
+    with pytest.raises(ValueError, match="outside 2..360"):
+        features(flow(), FeatureSettings(reliability_mode="none", angle_bins=361))

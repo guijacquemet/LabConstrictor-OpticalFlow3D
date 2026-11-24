@@ -111,8 +111,10 @@ The optical flow of one field of view in the upstream file layout:
     histogram reference frame);
   - `velocity_units`, `reliability`, app and Python/NumPy versions, and the computing time.
 
-A field of view's flow is written into a temporary folder and published with one rename only when
-complete, so an interrupted run leaves no partial result.
+A field of view's flow is written into a temporary folder (`<fov_uid>.partial-<random>`) and
+published with one rename only when complete, so no incomplete result is ever published. The
+temporary folder is removed on any error the app sees; after a hard crash (killed process, power
+loss) it can remain and occupy disk space, and can be deleted by hand.
 
 #### `features/`
 
@@ -126,7 +128,9 @@ complete, so an interrupted run leaves no partial result.
 - **`feature_dictionary.json`**: `units` (`lateral`, `axial`, `time`), `column_naming` (scheme and
   object-set name), the metadata and frame-identifier columns, and one entry per column for the
   per-frame and per-FOV tables: name, family, description, formula, unit, level, requirements,
-  applicability (`biological`, `experimental_axial`, `orientation`, `qc`) and when it is undefined.
+  applicability (`biological`, `experimental_axial`, `orientation`, `qc`) and when it is undefined;
+  and `feature_implementation`: the SHA-256 of all these definitions and of the code that computes
+  the features. Runs are combined only when both are equal.
   The human-readable version is the [Feature glossary](features.md).
 
 Column names: `<foreground name>__<feature>` (`Nuclei__speed_xy_median`), or `whole__<feature>`
@@ -231,7 +235,7 @@ are metadata: **never** given to MorphoCoverage as features. Full definitions:
 | How much was measured? | `qc_n_analysed_voxels`, `qc_foreground_fraction` | Tiny counts make every feature noisy. Occupancy differences between conditions change what the foreground holds. |
 | Were the regional features well supported? | `qc_n_regions`, `qc_n_regions_analysed`, `qc_region_grid_coverage` | Regional features need at least 2 analysed regions; more is better. Coverage below 1 means partial edge regions were left out. |
 | Are nuclei of similar size? | `qc_object_mean_voxels`, `qc_object_mean_z_extent`, `qc_n_objects` | The optical-flow gain depends on nuclear size and Z extent ([Validation](validation.md)). A size difference between conditions is a confounder of speed. Objects are 3D connected components of the foreground, so touching nuclei count as one object. |
-| Did the brightness change? | `qc_brightness_change_per_frame` | The relative brightness slope per frame in each window (always measured, on raw intensities). Above 0.02 (2 %/frame) is flagged. |
+| Did the brightness change? | `qc_brightness_change_per_frame` | The relative brightness slope per frame in each window (always measured, on raw intensities). An absolute value above 0.02 (brightening or dimming by more than 2 %/frame) is flagged. |
 | Similar intensity? (opt-in) | `qc_foreground_intensity_mean` | Only with *Also report intensity-based QC* ticked in section 2. |
 
 In `features_per_fov.csv` the QC columns are time averages, like the features. Use
@@ -254,7 +258,8 @@ section 3 table, and stored in the `warnings` column of `fovs.csv` and in `run_m
 
 | Warning (start of the text) | Cause | What to do |
 |---|---|---|
-| `The global brightness changes by up to X% per frame (optical flow reads part of it as motion; consider brightness equalisation)` | `qc_brightness_change_per_frame` above 0.02 in at least one window of the field of view. | Compare `qc_brightness_change_per_frame` between conditions. If it differs or is large, consider a [brightness correction](theory.md#7-brightness-change-and-optional-correction) (for every condition). |
+| `The global brightness changes by up to X% per frame (optical flow reads part of it as motion; consider brightness equalisation)` | An absolute `qc_brightness_change_per_frame` above 0.02 (brightening or bleaching) in at least one window of the field of view. | Compare `qc_brightness_change_per_frame` between conditions. If it differs or is large, consider a [brightness correction](theory.md#7-brightness-change-and-optional-correction) (for every condition). |
+| `Brightness QC not reused: …` | The optical flow was reused from a run whose brightness QC was measured by another brightness implementation. The velocities are still valid; `qc_brightness_change_per_frame` is left empty with the reason. | Recompute the optical flow (a new run without `reuse_from`) if you need the brightness QC. |
 | `... (brightness equalisation was applied to the optical-flow input)` | Same, with a correction switched on. | Check that the correction removed the artefact (speeds stable over time, `vz` near 0). |
 | `The header states pixel_size_x=… but … was used.` | The image header's calibration differs by more than 1 % from the confirmed calibration. | Check which value is right. Images with different acquisition settings belong in separate runs. |
 | `The Z stack (N slices) is shorter than the spatial derivative kernel …` | 3D mode with fewer slices than `2·ceil(3·xyzSig) + 1`. | Treat axial features as experimental, or use per-slice 2D flow. |
@@ -328,7 +333,7 @@ conditions imaged with the same settings; do not read them as absolute nuclear s
 | [Speed](features.md#speed) | How fast does the nuclear signal move? | `speed_xy_median`, `speed_xy_mean`, `speed_xy_p90`, `speed_xy_cv` | A drug that stalls migration lowers the median and the high percentiles. `cv` and the spread between `p10` and `p90` describe how variable motion is within the field of view. |
 | [Velocity components](features.md#velocity-components) | How is motion split between axes? | `vx_sd`, `vy_sd`, `vx_abs_mean`, `vy_abs_mean`; axial `vz_*` | `vx_abs_mean` and `vy_abs_mean` differ when motion is mostly along one image axis. Axial columns are experimental. |
 | [Collective motion and direction](features.md#collective-motion-and-direction) | Do nuclei move together, and in which pattern? | `coherence_xy_global`, `coherence_xy_local`, `xy_angular_entropy`, `xy_angular_dispersion`, `xy_aligned_fraction` | Collective migration in one direction: high global coherence, low entropy and dispersion, high aligned fraction. Swirls or local streams: high local but low global coherence. Random motion: low coherence, entropy near 1. |
-| [Spatial heterogeneity](features.md#spatial-heterogeneity) | Is motion uniform across the field of view? | `regional_speed_cv`, `regional_speed_spread`, `regional_coherence_sd`, `regional_moving_fraction` | A tissue with a migrating front and a static core has high regional variation. `regional_moving_fraction` tells how much of the field of view moves above your chosen speed. |
+| [Spatial heterogeneity](features.md#spatial-heterogeneity) | Is motion uniform across the field of view? | `regional_speed_cv`, `regional_speed_spread`, `regional_coherence_sd`, `regional_moving_fraction` | A tissue with a migrating front and a static core has high regional variation. `regional_moving_fraction` is the fraction of the eligible analysed regions (full squares with enough analysed voxels) whose mean speed exceeds your chosen threshold; it is not a fraction of the tissue area. The regions are a grid fixed to the image axes, so compare samples imaged in a similar orientation. |
 | [Quality control](features.md#quality-control) | Can I trust and compare these numbers? | `qc_reliable_fraction`, `qc_foreground_fraction`, `qc_object_mean_voxels`, `qc_brightness_change_per_frame` | Used to check comparability, never as a result. See [Quality control](#quality-control). |
 
 Speed-weighted versus unweighted: `coherence_xy_global` gives fast voxels more weight, while the
@@ -342,7 +347,7 @@ Every column has a *use* in the glossary (and in `feature_dictionary.json` as `a
 
 | Use | Given to MorphoCoverage? | Columns | Why |
 |---|---|---|---|
-| **readout** | Always | XY speed, `lateral_speed_mean`, XY coherence, angular entropy, dispersion and aligned fraction, regional columns | They describe the motion itself and do not change when the image is rotated. |
+| **readout** | Always | XY speed, `lateral_speed_mean`, XY coherence, angular entropy, dispersion and aligned fraction, regional columns | They describe the motion itself. Global speed, global coherence and the angular features do not depend on how the sample lies in the image (the angular entropy within its measured numerical error). Spatial measurements do: local coherence uses a square window and the regional columns a square grid, both fixed to the image axes, so compare samples imaged in a similar orientation. |
 | **axial readout (experimental)** | Only when you tick *Also include experimental axial features* (a chosen axial readout is always included) | `vz_sd`, `vz_abs_mean`, `axial_lateral_ratio`, `coherence_3d_global`, `speed_3d_*` | Axial velocities are less reliable in shallow stacks (see pitfalls). |
 | **orientation descriptor** | Never | every `vx_*` and `vy_*` column (`vx_mean`, `vx_sd`, `vx_abs_mean`, and the same for `vy`), `vz_mean`, `xy_dominant_direction_deg` | They depend on how the sample was placed under the microscope. Two identical samples rotated by 90° give different values, so they are not phenotypes. Use them only within one image, for example to check a known flow direction. |
 | **quality control** | Never | every `qc_*` column | They describe the measurement (reliability, occupancy, object size, brightness), not the biology. Treating them as phenotypes would let imaging differences masquerade as effects. |
@@ -358,7 +363,7 @@ both. Compare these QC columns between conditions in `features_per_fov.csv` (or
 | Similar reliability | `qc_reliable_fraction`, `qc_reliability_median` | If one condition has much less reliable flow, its features come from fewer, possibly different voxels. |
 | Similar occupancy | `qc_foreground_fraction`, `qc_n_analysed_voxels` | Denser or sparser tissue changes what the foreground holds; with no foreground, background dominates sparse fields of view. |
 | Similar object size | `qc_object_mean_voxels`, `qc_object_mean_z_extent` | **The optical-flow gain depends on nuclear size and axial extent.** If nuclei are larger in one condition, its speeds can differ even with identical motion. |
-| Little brightness change | `qc_brightness_change_per_frame` | Brightening or bleaching is partly read as motion. Values above 0.02/frame are flagged. |
+| Little brightness change | `qc_brightness_change_per_frame` | Brightening or bleaching is partly read as motion. Absolute values above 0.02/frame are flagged. |
 | Similar intensity (optional) | `qc_foreground_intensity_mean` | Brightness affects gradients and therefore reliability and noise. |
 | Enough regions | `qc_n_regions_analysed` | Regional features from 2–3 regions are noisy. |
 
@@ -392,8 +397,11 @@ consider whether it can explain the effect.
    unreliable velocities); one that is too high keeps only bright nuclear cores. Check the
    foreground outlines in the [QC figures](#qc-figures). Whole-image measurement is
    exploratory.
-8. **Reliability mode.** With `percentile`, the threshold adapts to each frame, so a fixed
-   fraction of the foreground is always kept, even when the whole frame is unreliable. With
+8. **Reliability mode.** With `percentile`, the threshold adapts to each frame: it is the chosen
+   percentile of the finite reliability values, and every voxel at or above it is kept. This is
+   not a guaranteed kept fraction: ties at the threshold keep more voxels, invalid velocities or
+   reliability fewer, and a frame that is unreliable everywhere still keeps its relatively best
+   voxels. With
    `absolute`, one value applies to every field of view, which keeps the criterion identical
    across conditions.
 9. **Undefined is not zero.** An empty cell means the value does not exist (for example no
@@ -476,15 +484,17 @@ figures below come from synthetic nuclei and one real crop ([Validation](validat
   a time; measured 11.35 GB peak for a 7 × 11 × 1840 × 1840 uint16 window on a 4-vCPU machine).
 - **Time:** about 12–15 minutes per 1840 × 1840 × 11 × 15 field of view on a 4-vCPU machine
   (83.5 s measured per optical-flow output, 9 outputs; the notebook's estimate is rough).
-- **Disk:** 9.4 GB of float64 output per such field of view (4.7 GB as float32).
+- **Disk:** 9.4 GB of output per field of view with float64 velocities (5.4 GB with float32; the reliability stays in the upstream's precision, float32 in 3D and float64 per slice, so per-slice outputs are 8.0 GB or 5.4 GB).
 - **No tiling, GPU or multiprocessing**, and images are never downsampled. If the memory estimate
   exceeds the available memory, use a computer with more memory.
-- The resource estimate in section 2 uses figures measured on the 3D algorithm, also in per-slice
-  mode (which writes no `vz` files, so its output is smaller than estimated).
+- The resource estimate in section 2 counts the arrays each output writes, by mode and output
+  type (no `vz` per slice; float64 reliability per slice, float32 in 3D), without TIFF headers.
+  Its memory and time figures are measured on the 3D algorithm and are rough for per-slice mode.
 
 ### Platforms
 
-- The desktop installer is built and tested for **Linux x86-64 only**. Windows and macOS
+- The desktop installer is built for **Linux x86-64 only** (release 0.1.0 was installed and run
+  on Linux; every new release is tested again before it is published). Windows and macOS
   installers are not built; use Google Colab or a Python install there
   ([Installation](getting_started.md#installation)).
 - On a remote Jupyter server, the report link (`127.0.0.1`) opens on your own computer; open

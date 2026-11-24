@@ -27,6 +27,13 @@ LENGTH_TO_MICROMETRE = {"nm": 1e-3, "um": 1.0, "µm": 1.0, "micron": 1.0, "mm": 
 TIME_TO_MINUTE = {"ms": 1 / 60000, "s": 1 / 60, "sec": 1 / 60, "min": 1.0, "h": 60.0}
 
 
+MAX_ANGLE_BINS = 360
+"""Finest angular resolution of the XY angular entropy: a 1° kernel. Measured on the 2**16-point
+grid: a single direction half a grid step off gives at most 8.4e-7 and rotations change the value
+by at most 1.5e-7 at 360 (2.5e-7 in an independent sweep); at 1024 these are 5.5e-6 and 1.0e-6
+(round 3 of the audit)."""
+
+
 class InputError(ValueError):
     """Raised when an input cannot be analysed as configured."""
 
@@ -181,6 +188,46 @@ def check_channel(axes: str, shape: tuple[int, ...]) -> list[Issue]:
     return []
 
 
+MAX_SIGMA = 1e4
+"""Largest optical-flow sigma accepted (pixels or frames). Kernels span about 6 sigma; a larger
+sigma has no use on a microscopy image and its kernel size would overflow (round 3)."""
+
+
+def check_sigmas(params: FlowParameters) -> list[Issue]:
+    """Check that every optical-flow sigma is a positive finite number up to :data:`MAX_SIGMA`.
+
+    Needs no image, so it runs before a run folder is created and before any window or kernel
+    size is computed (``math.ceil(3 * 1e308)`` raises ``OverflowError``).
+    """
+    sigmas = (("xyzSig", params.xyz_sig), ("tSig", params.t_sig), ("wSig", params.w_sig))
+    bad = [
+        f"{name}={value}"
+        for name, value in sigmas
+        if not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
+    ]
+    if bad:
+        return [
+            Issue(
+                "error",
+                "invalid_sigma",
+                f"The optical-flow parameters must be positive numbers ({', '.join(bad)}); a "
+                "time window then always has at least 3 frames.",
+                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or other positive values.",
+            )
+        ]
+    large = [f"{name}={value}" for name, value in sigmas if value > MAX_SIGMA]
+    if large:
+        return [
+            Issue(
+                "error",
+                "sigma_too_large",
+                f"The optical-flow parameters must be at most {MAX_SIGMA:g} ({', '.join(large)}).",
+                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or values of a few units.",
+            )
+        ]
+    return []
+
+
 def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Issue]:
     """Check that the movie is long enough for the upstream time window.
 
@@ -198,25 +245,9 @@ def check_time_and_depth(n_t: int, n_z: int, params: FlowParameters) -> list[Iss
         ``window_length`` frames exist or Z has one slice; a warning when the Z stack is
         shorter than the spatial smoothing kernel.
     """
-    bad = [
-        f"{name}={value}"
-        for name, value in (
-            ("xyzSig", params.xyz_sig),
-            ("tSig", params.t_sig),
-            ("wSig", params.w_sig),
-        )
-        if not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
-    ]
-    if bad:
-        return [
-            Issue(
-                "error",
-                "invalid_sigma",
-                f"The optical-flow parameters must be positive numbers ({', '.join(bad)}); a "
-                "time window then always has at least 3 frames.",
-                "Use the upstream defaults (xyzSig 3, tSig 1, wSig 4) or other positive values.",
-            )
-        ]
+    sigma_issues = check_sigmas(params)
+    if sigma_issues:
+        return sigma_issues
     issues: list[Issue] = []
     if not 6 * params.t_sig + 1 <= n_t or n_t < params.window_length:  # no overflow first
         needed = params.window_length if math.isfinite(6 * params.t_sig) else "more"
@@ -347,9 +378,14 @@ def _convert(value: float | None, unit: str, table: dict[str, float], kind: str)
     key = unit.strip()
     if key not in table:
         raise InputError(f"Unknown {kind} unit '{unit}'. Use one of: {', '.join(table)}.")
-    if not value > 0:
-        raise InputError(f"A {kind} calibration must be positive, not {value}.")
-    return float(value) * table[key]
+    if not (math.isfinite(value) and value > 0):
+        raise InputError(f"A {kind} calibration must be a positive finite number, not {value}.")
+    converted = float(value) * table[key]
+    if not math.isfinite(converted):  # 1e308 mm overflows in µm
+        raise InputError(f"A {kind} calibration of {value} {key} is too large to convert.")
+    if not converted > 0:  # 1e-320 ms underflows to 0 minutes
+        raise InputError(f"A {kind} calibration of {value} {key} is too small to convert.")
+    return converted
 
 
 def check_calibration(calibration: Calibration) -> list[Issue]:
@@ -390,6 +426,67 @@ def check_calibration(calibration: Calibration) -> list[Issue]:
     return issues
 
 
+def non_finite_settings(features: FeatureSettings, foreground: ForegroundSpec) -> list[Issue]:
+    """Refuse a numeric setting that is NaN or infinite (round 4).
+
+    ``intensity > NaN`` is false everywhere, so a NaN foreground threshold would read as an
+    empty foreground and a NaN motion threshold as no moving region: zeros that were never
+    measured.
+    """
+    values = {
+        "foreground threshold": foreground.threshold,
+        "reliability value": features.reliability_value,
+        "moving-region threshold": features.motion_threshold,
+        "min_direction_speed": features.min_direction_speed,
+        "aligned_angle_deg": features.aligned_angle_deg,
+    }
+    bad = [
+        f"{name}={value}"
+        for name, value in values.items()
+        if value is not None and not (isinstance(value, int | float) and math.isfinite(value))
+    ]
+    if not bad:
+        return []
+    return [
+        Issue(
+            "error",
+            "non_finite_setting",
+            f"These settings are not finite numbers: {', '.join(bad)}.",
+            "Enter ordinary numbers (NaN and infinity are never accepted).",
+        )
+    ]
+
+
+def calibration_issues(calibration: Calibration) -> list[Issue]:
+    """Refuse a calibration value that is given but not a positive finite number (round 4).
+
+    Covers a ``Calibration`` built directly in Python, which does not pass through the
+    unit conversions.
+    """
+    values = {
+        "pixel_size_x": calibration.pixel_size_x,
+        "pixel_size_y": calibration.pixel_size_y,
+        "pixel_size_z": calibration.pixel_size_z,
+        "frame_interval": calibration.frame_interval,
+    }
+    bad = [
+        f"{name}={value}"
+        for name, value in values.items()
+        if value is not None
+        and not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
+    ]
+    if not bad:
+        return []
+    return [
+        Issue(
+            "error",
+            "invalid_calibration",
+            f"Calibration values must be positive finite numbers: {', '.join(bad)}.",
+            "Enter the pixel sizes, Z spacing and frame interval, or leave a value empty.",
+        )
+    ]
+
+
 def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec) -> list[Issue]:
     """Check feature and foreground settings before anything is computed.
 
@@ -405,7 +502,7 @@ def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec
     list of Issue
         Errors for missing or impossible values.
     """
-    issues: list[Issue] = []
+    issues: list[Issue] = non_finite_settings(features, foreground)
     mode, value = features.reliability_mode, features.reliability_value
     if mode != "none" and value is None:
         issues.append(
@@ -437,6 +534,16 @@ def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec
             issues.append(
                 Issue("error", f"{name}_too_small", f"{name} must be at least {minimum}.", "")
             )
+    if features.angle_bins > MAX_ANGLE_BINS:
+        issues.append(
+            Issue(
+                "error",
+                "angle_bins_too_large",
+                f"angle_bins must be at most {MAX_ANGLE_BINS} (a 1° kernel): finer kernels are not "
+                "resolved by the entropy's grid, which would break its rotation invariance.",
+                "Use the default 36 (a 10° kernel) or another value up to 360.",
+            )
+        )
     if features.min_direction_speed < 0:
         issues.append(
             Issue(

@@ -221,7 +221,11 @@ def _scaled(
     if not math.isfinite(number) or number <= 0:
         notes.append(f"{name}={value} is not a valid positive value.")
         return None
-    return number * table[key]
+    converted = number * table[key]
+    if not (math.isfinite(converted) and converted > 0):  # overflow or underflow on conversion
+        notes.append(f"{name}={value} {unit} cannot be converted to a usable value.")
+        return None
+    return converted
 
 
 def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
@@ -247,6 +251,11 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
             "Y and X must be the last two axes of the file; other layouts are "
             "not supported in this version."
         )
+    if "S" in header.header_axes:
+        raise InputError(
+            "The file stores samples per pixel (RGB or similar planar samples); "
+            "save the nuclear channel as a greyscale TIFF."
+        )
     contradicted = named_axis_conflicts(spec.axes.strip().upper(), header.header_axes)
     if contradicted:
         raise InputError(
@@ -261,28 +270,34 @@ def validate_image(spec: ImageSpec, header: ImageHeader) -> None:
             f"multiple_series: {header.path.name} holds {header.n_series} image series "
             "(several positions or scenes); save one field of view per file (MorphoBricks)."
         )
-    if "S" in header.header_axes:
-        raise InputError(
-            "The file stores samples per pixel (RGB or similar planar samples); "
-            "save the nuclear channel as a greyscale TIFF."
-        )
+
+
+UNKNOWN_AXES = "QI"
+"""tifffile's letters for a dimension without a known role: the only axes a user may name."""
 
 
 def named_axis_conflicts(confirmed: str, header_axes: str) -> str:
     """Return where confirmed axes contradict the axes a header names ('' when none).
 
     Every position whose header letter is an axis role (``T``, ``Z``, ``C``, ``Y``, ``X``)
-    must be confirmed with that letter; unknown positions (tifffile's ``Q``, ``I``) are the
-    user's to confirm. A header without ``T`` (``ZCYX``) therefore cannot be read as a
-    time-lapse (re-validation R3).
+    must be confirmed with that letter, and a position the header names with any other
+    letter (``E``, ``H``, ``A``, ``R``, ``0``, ...) is a dimension the profiler does not
+    analyse, so it is refused; only tifffile's unknown positions (:data:`UNKNOWN_AXES`,
+    ``Q`` and ``I``) are the user's to confirm. A header without ``T`` (``ZCYX``) or with
+    another named axis (``EZYX``) therefore cannot be read as a time-lapse (re-validation
+    R3 and round 3).
     """
     if len(confirmed) != len(header_axes):
         return f"{len(confirmed)} axes confirmed for {len(header_axes)} in the file"
-    return ", ".join(
-        f"axis {i + 1} is {named} in the header, not {given}"
-        for i, (given, named) in enumerate(zip(confirmed, header_axes, strict=True))
-        if named in "TZCYX" and given != named
-    )
+    found = []
+    for i, (given, named) in enumerate(zip(confirmed, header_axes, strict=True)):
+        if named in UNKNOWN_AXES or given == named:
+            continue
+        if named in "TZCYX":
+            found.append(f"axis {i + 1} is {named} in the header, not {given}")
+        else:
+            found.append(f"axis {i + 1} is {named} in the header, a dimension not analysed")
+    return ", ".join(found)
 
 
 def dimensions(spec: ImageSpec, header: ImageHeader) -> dict[str, int]:

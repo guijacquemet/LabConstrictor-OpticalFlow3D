@@ -17,6 +17,7 @@ import pandas as pd
 from .experiment import METADATA_COLUMNS
 from .feature_dictionary import FeatureDef
 from .naming import feature_key
+from .results import definitions_sha256
 from .validation import InputError
 
 
@@ -77,15 +78,16 @@ def run_labels(runs: list[Path]) -> dict[Path, str]:
     InputError
         When two runs get one label (the same folder listed twice).
     """
-    labels = {
-        run: f"{run.name}-{hashlib.sha256(str(run.resolve()).encode('utf-8')).hexdigest()[:16]}"
-        for run in runs
-    }
+    labels: dict[Path, str] = {}
     seen: dict[str, Path] = {}
-    for run, label in labels.items():
-        if label in seen:
-            raise InputError(f"{seen[label]} and {run} are the same run folder; load it once.")
-        seen[label] = run
+    for run in runs:  # every entry, so a folder listed twice is refused, not merged
+        resolved = str(Path(run).resolve())  # a symbolic link to a run is the same run
+        label = f"{Path(run).name}-{hashlib.sha256(resolved.encode('utf-8')).hexdigest()[:16]}"
+        for key in (label, resolved):
+            if key in seen:
+                raise InputError(f"{seen[key]} and {run} are the same run folder; load it once.")
+            seen[key] = run
+        labels[run] = label
     return labels
 
 
@@ -101,6 +103,67 @@ def _read_table(run: Path, label: str) -> pd.DataFrame:
     table = pd.read_csv(path, dtype=text, keep_default_na=False, na_values=[""])
     table.insert(1, "run", label)
     return table
+
+
+def _check_dictionary(run: Path, info: dict, several: bool) -> None:
+    """Refuse a feature dictionary that describes a column twice.
+
+    When runs are combined, also refuse one without the identity of its feature definitions
+    and code.
+    """
+    names = [d["name"] for d in info.get("fov_features", [])]
+    twice = sorted({n for n in names if names.count(n) > 1})
+    if twice:
+        raise InputError(f"{run} describes these features twice: {', '.join(twice)}.")
+    recorded = info.get("feature_implementation")
+    if recorded is not None:
+        actual = definitions_sha256(info.get("frame_features", []) + info.get("fov_features", []))
+        if recorded.get("definitions_sha256") != actual:
+            raise InputError(
+                f"{run}: the feature definitions in feature_dictionary.json do not match their "
+                "recorded hash (the file was edited after the run); its features cannot be "
+                "trusted or combined."
+            )
+    if several and recorded is None:
+        raise InputError(
+            f"{run} was extracted before runs recorded the identity of their feature definitions "
+            "and code, so it cannot be shown to measure the same thing as the other runs. "
+            "Re-extract its features with this version (a new run with reuse_from reuses its "
+            "verified optical flow)."
+        )
+
+
+def _check_same_features(run: Path, first: Path, info: dict, reference: dict) -> None:
+    """Refuse two runs whose units, feature columns, definitions or feature code differ."""
+    if info["units"] != reference["units"]:
+        raise InputError(
+            f"{run} uses other units ({info['units']}) than {first} "
+            f"({reference['units']}); runs cannot be combined."
+        )
+    names = [d["name"] for d in reference["fov_features"]]
+    other = [d["name"] for d in info["fov_features"]]
+    if names != other:
+        only = sorted(set(names) ^ set(other))[:6]
+        raise InputError(
+            f"{run} has other feature columns than {first} (for example "
+            f"{', '.join(only) or 'the same names in another order'}): another "
+            "speed mode or object-set name; runs cannot be combined."
+        )
+    mine, theirs = info["feature_implementation"], reference["feature_implementation"]
+    keys = ("definitions_sha256", "code_sha256", "normalization")
+    differ = [k for k in keys if mine.get(k) != theirs.get(k)]
+    if differ:
+        what = {
+            "definitions_sha256": "feature definitions",
+            "code_sha256": "feature code",
+            "normalization": "normalization code",
+        }
+        raise InputError(
+            f"{run} and {first} were computed with other {' and '.join(what[k] for k in differ)} "
+            "(another profiler version): columns with one name may not measure the same thing, "
+            "so the runs cannot be combined. Re-extract the features of every run with one "
+            "version (new runs with reuse_from reuse their verified optical flow)."
+        )
 
 
 def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> FeatureSet:
@@ -139,24 +202,12 @@ def load_runs(run_dirs: list[Path], shared_repeat_labels: bool = False) -> Featu
         if not (run / "features" / "features_per_fov.csv").is_file() or not dict_path.is_file():
             raise InputError(f"{run} has no feature tables; extract features first.")
         info = json.loads(dict_path.read_text(encoding="utf-8"))
+        _check_dictionary(run, info, several=len(runs) > 1)
         settings = comparable_settings(run)
         if dictionary is None:
             dictionary, reference = info, settings
         else:
-            names = [d["name"] for d in dictionary["fov_features"]]
-            other = [d["name"] for d in info["fov_features"]]
-            if info["units"] != dictionary["units"]:
-                raise InputError(
-                    f"{run} uses other units ({info['units']}) than {runs[0]} "
-                    f"({dictionary['units']}); runs cannot be combined."
-                )
-            if names != other:
-                only = sorted(set(names) ^ set(other))[:6]
-                raise InputError(
-                    f"{run} has other feature columns than {runs[0]} (for example "
-                    f"{', '.join(only) or 'the same names in another order'}): another "
-                    "speed mode or object-set name; runs cannot be combined."
-                )
+            _check_same_features(run, runs[0], info, dictionary)
             changed = _differences(reference, settings)
             if changed:
                 raise InputError(

@@ -95,7 +95,7 @@ def test_all_steps_drive_end_to_end(tmp_path):
     settings.rel_value.value = "0.001"
     settings.region.value = 24
     settings.tsig.value = 1e308  # re-validation M8: OverflowError escaped the guarded display
-    with pytest.raises(InputError, match="too_few_frames|needs at least more"):
+    with pytest.raises(InputError, match="sigma_too_large|at most"):
         settings.estimate()
     settings.tsig.value = 1.0
     settings.estimate()
