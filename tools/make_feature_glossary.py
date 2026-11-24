@@ -34,20 +34,25 @@ FAMILIES = {
     ),
     "components": (
         "Velocity components",
-        "The X, Y and Z components of the velocity separately. Signed means depend on how "
-        "the image is oriented; spreads and absolute values do not.",
+        "The X, Y and Z components of the velocity separately. Every X and Y statistic "
+        "(signed mean, spread and absolute mean) depends on how the image axes lie on the "
+        "sample, so they are orientation descriptors; Z is defined by the microscope.",
     ),
     "collective": (
         "Collective motion and direction",
         "Whether neighbouring and distant nuclei move together, and how directions are "
-        "spread. The angular features use only vectors whose XY speed exceeds "
+        "spread. Global coherence and the angular features do not depend on image "
+        "orientation (the angular entropy within its measured numerical error); local "
+        "coherence uses a square window on the image grid. The angular features use only "
+        "vectors whose XY speed exceeds "
         "`min_direction_speed`, and need at least `min_direction_vectors` of them.",
     ),
     "spatial": (
         "Spatial heterogeneity",
         "How different the motion is between regions of the field of view: the image is cut "
         "into square regions of `region_size_px` pixels and each full region with at least "
-        "`min_region_voxels` analysed voxels gets its own speed and coherence.",
+        "`min_region_voxels` analysed voxels gets its own speed and coherence. The grid is "
+        "fixed to the image axes, so these values depend on how the sample lies in the image.",
     ),
     "quality": (
         "Quality control",

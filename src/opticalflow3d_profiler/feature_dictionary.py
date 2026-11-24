@@ -64,6 +64,12 @@ SPEED_NOTE = (
 )
 
 
+NO_3D_SPEED = (
+    "; the whole family when the flow has no Z component (per-slice 2D flow) or X, Y, Z and"
+    " time are not calibrated in one physical unit"
+)
+
+
 def _magnitude(mode: SpeedMode) -> list[FeatureDef]:
     """Return the magnitude family for the run's speed mode."""
     prefix = "speed_3d" if mode == "xyz" else "speed_xy"
@@ -84,11 +90,13 @@ def _magnitude(mode: SpeedMode) -> list[FeatureDef]:
             "magnitude",
             text + " over analysed voxels." + SPEED_NOTE,
             f"s = {speed} per voxel (scaled per axis); {formula}",
-            "1" if key == "cv" else "lateral",
+            "1" if key == "cv" else ("µm/min" if mode == "xyz" else "lateral"),
             "frame",
             "vx, vy" + (", vz" if mode == "xyz" else ""),
             applicability,
-            NO_VOXELS + ("; cv: mean speed is zero" if key == "cv" else ""),
+            NO_VOXELS
+            + ("; cv: mean speed is zero" if key == "cv" else "")
+            + (NO_3D_SPEED if mode == "xyz" else ""),
         )
         for key, (text, formula) in stats.items()
     ]
@@ -96,6 +104,7 @@ def _magnitude(mode: SpeedMode) -> list[FeatureDef]:
 
 NONZERO = "fewer than min_direction_vectors analysed vectors with XY speed > min_direction_speed"
 FEW_REGIONS = "fewer than 2 full regions with min_region_voxels analysed voxels"
+SPEED_UNDEFINED = "; the run's speed undefined (3D speed without one physical unit)"
 ORIENTED = " Depends on image orientation; not comparable between differently oriented images."
 
 # name, description, formula, unit, requires, applicability, undefined
@@ -165,7 +174,8 @@ COLLECTIVE_ROWS = [
     (
         "coherence_xy_local",
         "Mean local XY coherence in a square XY window (local_window_px) of the same slice; "
-        "windows with fewer than min_local_vectors analysed nonzero vectors are left out.",
+        "windows with fewer than min_local_vectors analysed nonzero vectors are left out. The "
+        "window is square on the image grid, so it is not exactly rotation-symmetric.",
         "mean over analysed voxels of |Σ_window v| / Σ_window |v|",
         "1",
         "vx, vy",
@@ -200,7 +210,7 @@ COLLECTIVE_ROWS = [
         "1",
         "vx, vy",
         BIOLOGICAL,
-        NONZERO + "; mean resultant zero",
+        NONZERO + "; mean resultant below 1e-12 (no dominant direction)",
     ),
     (
         "xy_dominant_direction_deg",
@@ -211,7 +221,7 @@ COLLECTIVE_ROWS = [
         "degree",
         "vx, vy",
         ORIENTATION,
-        NONZERO + "; mean resultant zero",
+        NONZERO + "; mean resultant below 1e-12 (no dominant direction)",
     ),
 ]
 
@@ -228,7 +238,7 @@ SPATIAL_ROWS = [
         "1",
         "speed",
         BIOLOGICAL,
-        FEW_REGIONS,
+        FEW_REGIONS + "; mean regional speed is zero" + SPEED_UNDEFINED,
     ),
     (
         "regional_speed_spread",
@@ -237,7 +247,7 @@ SPATIAL_ROWS = [
         "1",
         "speed",
         BIOLOGICAL,
-        FEW_REGIONS,
+        FEW_REGIONS + "; median regional speed is zero" + SPEED_UNDEFINED,
     ),
     (
         "regional_coherence_sd",
@@ -250,14 +260,49 @@ SPATIAL_ROWS = [
     ),
     (
         "regional_moving_fraction",
-        "Fraction of regions whose mean speed exceeds motion_threshold." + GRID,
+        "Fraction of the eligible regions (full squares with min_region_voxels analysed "
+        "voxels) whose mean speed exceeds motion_threshold; not a fraction of the tissue area."
+        + GRID,
         "mean(R > motion_threshold)",
         "1",
         "speed, motion_threshold",
         BIOLOGICAL,
-        "motion_threshold not set; no region",
+        "motion_threshold not set; no region with min_region_voxels analysed voxels (one is "
+        "enough); the run's speed undefined (3D speed without one physical unit)",
     ),
 ]
+
+QC_UNDEFINED = {
+    "qc_reliability_threshold": (
+        "reliability_mode none (no filtering); percentile mode with no finite reliability in the "
+        "finite-velocity foreground"
+    ),
+    "qc_reliability_median": ("no finite-velocity foreground voxel with finite reliability"),
+    "qc_reliability_p10": ("no finite-velocity foreground voxel with finite reliability"),
+    "qc_reliability_p90": ("no finite-velocity foreground voxel with finite reliability"),
+    "qc_reliable_fraction": ("no finite-velocity foreground voxel"),
+    "qc_invalid_velocity_fraction": ("no foreground voxel (empty foreground)"),
+    "qc_foreground_fraction": (
+        "no foreground defined (whole-image measurement); an empty foreground gives 0, not empty"
+    ),
+    "qc_n_analysed_voxels": ("never (0 when nothing qualifies)"),
+    "qc_n_regions": ("never (0 when the image is smaller than one region)"),
+    "qc_n_regions_analysed": ("never (0 when no region qualifies)"),
+    "qc_region_grid_coverage": ("never (0 when the image is smaller than one region)"),
+    "qc_brightness_change_per_frame": (
+        "the central frame's mean raw intensity is not above 0 (measured on the whole raw window, "
+        "independent of the foreground); not recorded (older flow result) or recorded as null; "
+        "reused flow whose brightness QC came from another brightness implementation"
+    ),
+    "qc_invalid_reliability_fraction": ("no finite-velocity foreground voxel"),
+    "qc_foreground_intensity_mean": (
+        "no foreground defined; empty foreground; source intensities not supplied"
+    ),
+    "qc_object_mean_voxels": ("no foreground defined; empty foreground"),
+    "qc_object_mean_z_extent": ("no foreground defined; empty foreground"),
+    "qc_n_objects": ("no foreground defined; empty foreground"),
+}
+"""When each QC column is undefined (empty), column by column (round-3 documentation audit)."""
 
 QC_ROWS = [
     (
@@ -314,8 +359,9 @@ QC_ROWS = [
     (
         "qc_brightness_change_per_frame",
         "Global brightness change across the optical-flow time window (illumination, focus, "
-        "bleaching or expression). Optical flow reads part of a brightness change as motion; "
-        "values above 0.02 are flagged.",
+        "bleaching or expression), measured on the whole raw window. Optical flow reads part of "
+        "a brightness change as motion; absolute values above 0.02 (brightening or dimming by "
+        "more than 2 %/frame) are flagged.",
         "least-squares slope of the window frames' mean raw intensity / central frame's mean",
         "1/frame",
     ),
@@ -373,8 +419,8 @@ def _components(mode: SpeedMode) -> list[FeatureDef]:
 
 def _quality() -> list[FeatureDef]:
     """Return the quality-control family (metadata, never a MorphoCoverage feature)."""
-    rows = [(n, d, f, u, "rel, foreground", QC) for n, d, f, u in QC_ROWS]
-    return _rows("quality", rows, "no foreground voxel, or input not supplied")
+    rows = [(n, d, f, u, "rel, foreground", QC, QC_UNDEFINED[n]) for n, d, f, u in QC_ROWS]
+    return _rows("quality", rows)
 
 
 INTENSITY_COLUMNS = ("qc_foreground_intensity_mean",)

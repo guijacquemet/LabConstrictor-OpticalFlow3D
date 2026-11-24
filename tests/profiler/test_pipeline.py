@@ -412,6 +412,14 @@ def test_default_readout_is_a_feature_with_values(experiment):
     axial = FeatureDef(speed_3d, "magnitude", "", "", "lateral", "fov", "", AXIAL, "")
     undefined = replace_set(features, table=table, fov_defs=[axial, *features.fov_defs])
     assert default_readout(undefined) == SPEED
+    # Round-3 docs audit: without any speed median, an axial statistic (vz_sd) came first.
+    no_speed = [d for d in undefined.fov_defs if "speed_xy" not in d.name]
+    vz = FeatureDef("Nuclei__vz_sd", "components", "", "", "axial", "fov", "", AXIAL, "")
+    table = undefined.table.assign(**{"Nuclei__vz_sd": 0.1})
+    xyz = replace_set(undefined, table=table, fov_defs=[vz, *no_speed])
+    chosen = default_readout(xyz)
+    assert chosen != "Nuclei__vz_sd"
+    assert next(d for d in xyz.fov_defs if d.name == chosen).applicability != AXIAL
 
 
 def test_the_report_server_serves_only_files_inside_its_folder(tmp_path):

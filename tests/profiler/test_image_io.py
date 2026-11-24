@@ -206,3 +206,19 @@ def test_unknown_axes_remain_the_users_to_confirm(tmp_path, header_axes):
     header = inspect_tiff(path)
     assert header.header_axes == header_axes
     validate_image(ImageSpec(path, "TZYX"), header)  # no refusal
+
+
+def test_a_y_only_calibration_difference_is_noted_in_section_1(tmp_path):
+    # Round-3 docs audit: the cross-file calibration summary left out the Y pixel size.
+    import pandas as pd
+    from opticalflow3d_profiler.experiment_check import check_headers, header_notes
+
+    rows = []
+    for name, y_resolution in (("a.tif", 2.0), ("b.tif", 4.0)):
+        path = tmp_path / name
+        tifffile.imwrite(path, np.zeros((7, 3, 8, 8), np.uint16), imagej=True,
+                         resolution=(2.0, y_resolution),
+                         metadata={"axes": "TZYX", "unit": "um", "spacing": 1.0})  # fmt: skip
+        rows.append({"image_path": str(path), "source_relative_path": name})
+    table = check_headers(pd.DataFrame(rows), "TZYX")
+    assert any("calibrations differ" in n for n in header_notes(table))
