@@ -137,13 +137,18 @@ def claim_run(run_dir: Path) -> None:
         When the folder has been claimed or holds a run manifest.
     """
     claim = Path(run_dir) / RUN_CLAIM
-    try:
-        handle = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-    except FileExistsError:
+    manifest = Path(run_dir) / "run_manifest.json"
+    handle = None
+    if not manifest.exists():  # a finished run (also one older than the claim) is never touched
+        try:
+            handle = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            handle = None
+    if handle is not None and manifest.exists():  # a manifest appeared meanwhile: undo our claim
+        os.close(handle)
+        claim.unlink()
         handle = None
-    if handle is None or (Path(run_dir) / "run_manifest.json").exists():
-        if handle is not None:
-            os.close(handle)
+    if handle is None:
         raise InputError(
             f"{run_dir} already holds a run, finished, running or interrupted ({RUN_CLAIM} or "
             "run_manifest.json); a run is never run twice or overwritten. Create a new run, "

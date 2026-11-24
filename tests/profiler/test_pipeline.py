@@ -353,6 +353,7 @@ def test_a_run_folder_is_never_run_twice(experiment, tmp_path):
 
 
 def test_an_interrupted_or_concurrent_run_is_never_entered_again(experiment, tmp_path):
+    import threading
     from concurrent.futures import ThreadPoolExecutor
 
     from opticalflow3d_profiler.results import claim_run
@@ -366,8 +367,10 @@ def test_an_interrupted_or_concurrent_run_is_never_entered_again(experiment, tmp
         run_experiment(one, settings(), interrupted)
     assert not (interrupted / "run_manifest.json").exists()
     race = create_run(tmp_path, "race")
+    start = threading.Barrier(8)  # all threads claim at the same moment
 
     def attempt(_):
+        start.wait()
         try:
             claim_run(race)
             return True
@@ -461,3 +464,15 @@ def test_invalid_sigmas_are_refused_before_a_run_folder_is_claimed(experiment, t
     with pytest.raises(InputError):
         run_experiment(metadata.iloc[:1], bad, run)
     assert not (run / "run_started.json").exists()  # the folder stays usable
+
+
+def test_refusing_a_finished_run_never_writes_into_it(tmp_path):
+    # Round 3: a run older than the claim (manifest, no run_started.json) got an empty claim.
+    from opticalflow3d_profiler.results import claim_run
+
+    legacy = create_run(tmp_path, "legacy")
+    (legacy / "run_manifest.json").write_text("{}")
+    before = sorted(p.name for p in legacy.iterdir())
+    with pytest.raises(InputError, match="never run twice"):
+        claim_run(legacy)
+    assert sorted(p.name for p in legacy.iterdir()) == before

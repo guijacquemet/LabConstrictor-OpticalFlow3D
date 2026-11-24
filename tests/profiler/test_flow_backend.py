@@ -249,3 +249,27 @@ def test_a_failure_up_to_publication_removes_only_the_partial_folder(
                  flow / "f", "f")  # fmt: skip
     assert sorted(p.name for p in flow.iterdir()) == ["other"]
     assert (flow / "other" / "keep.txt").read_text() == "unrelated"
+
+
+def test_each_flow_run_owns_its_temporary_folder(tmp_path, imagej_file, monkeypatch):
+    # Round 3: the partial folder was named by PID only, so a stale or concurrent one could be
+    # taken over and then deleted by the cleanup.
+    import os
+
+    from opticalflow3d_profiler import flow_backend
+
+    path, _ = imagej_file
+    flow = tmp_path / "flow"
+    stale = flow / f"f.partial-{os.getpid()}"
+    stale.mkdir(parents=True)
+    (stale / "other.txt").write_text("not ours")
+
+    def fail(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(flow_backend.tifffile, "imwrite", fail)
+    with pytest.raises(OSError, match="disk full"):
+        run_flow(ImageSpec(path, "TZYX"), inspect_tiff(path), FlowParameters(mode="xyz"),
+                 flow / "f", "f")  # fmt: skip
+    assert (stale / "other.txt").read_text() == "not ours"
+    assert sorted(p.name for p in flow.iterdir()) == [stale.name]

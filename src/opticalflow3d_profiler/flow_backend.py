@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -394,8 +395,11 @@ def run_flow(
     report(f"Hashing {spec.path.name} (source identity)...")
     source = file_identity(spec.path)
     identity = flow_identity(spec, header, params, source)
-    partial = out_dir.with_name(out_dir.name + f".partial-{os.getpid()}")
-    partial.mkdir(parents=True)
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    # Created exclusively with a unique name: this call owns it, so the cleanup below can never
+    # remove a folder of another thread, process or earlier attempt (round 3).
+    partial = Path(tempfile.mkdtemp(prefix=f"{out_dir.name}.partial-", dir=out_dir.parent))
+    partial.chmod(0o755)  # mkdtemp makes it private; published results stay readable as before
     started = time.monotonic()
     stage = (tracker or Tracker()).stage(
         f"Optical flow {name}", len(identity["frame_map"]), nested=True
