@@ -555,3 +555,22 @@ def test_reused_flow_keeps_its_velocities_but_not_stale_brightness_qc():
     assert brightness_qc_current(current) and not brightness_qc_current(other)
     assert "changes by up to 50.0%" in brightness_warning(current, equalised=False)
     assert brightness_warning(other, equalised=False).startswith("Brightness QC not reused")
+
+
+@pytest.mark.parametrize(
+    "name", ["../experiment/rogue-run", "a/b", "/tmp/elsewhere", "..", " padded", "x\\y", "link"]
+)
+def test_run_and_report_names_never_lead_outside_their_folder(tmp_path, name):
+    # Round 4: '../experiment/rogue-run' created a run folder inside the experiment.
+    from opticalflow3d_profiler.results import contained
+
+    results, experiment = tmp_path / "results", tmp_path / "experiment"
+    results.mkdir()
+    experiment.mkdir()
+    (results / "link").symlink_to(experiment)  # a link inside results pointing out of it
+    with pytest.raises(InputError, match="plain folder name|leads outside"):
+        create_run(results, name)
+    with pytest.raises(InputError, match="plain folder name|leads outside"):
+        contained(results, name, "report name")
+    assert sorted(p.name for p in experiment.iterdir()) == []
+    assert create_run(results, "run-ok").parent == results

@@ -55,6 +55,38 @@ def distribution_identity(name: str) -> dict[str, str | None]:
     return {"version": dist.version, "commit": direct.get("vcs_info", {}).get("commit_id")}
 
 
+def contained(parent: Path, name: str, what: str) -> Path:
+    """Return ``parent / name`` after checking that ``name`` is one plain folder name.
+
+    A run or report name is a single path component: no separator, no ``..``, no absolute path,
+    no leading or trailing space, and the resolved destination lies inside ``parent`` (also
+    through a symbolic link), so an output folder can never be created elsewhere, for example
+    inside the experiment folder (round-4 audit).
+
+    Raises
+    ------
+    InputError
+        For a name that is not one plain folder name or resolves outside ``parent``.
+    """
+    bad = (
+        not name
+        or name != name.strip()
+        or name in (".", "..")
+        or any(sep in name for sep in ("/", "\\", "\0"))
+        or Path(name).is_absolute()
+        or Path(name).drive != ""
+    )
+    if bad:
+        raise InputError(
+            f"The {what} {name!r} must be one plain folder name (no '/', '\\', '..' or outer "
+            "spaces); outputs are only ever written inside their results folder."
+        )
+    target = Path(parent) / name
+    if not target.resolve().is_relative_to(Path(parent).resolve()):
+        raise InputError(f"The {what} {name!r} leads outside {parent}; choose another name.")
+    return target
+
+
 def create_run(parent: Path, name: str | None = None) -> Path:
     """Create a new, empty run folder.
 
@@ -73,10 +105,11 @@ def create_run(parent: Path, name: str | None = None) -> Path:
     Raises
     ------
     InputError
-        When the folder already exists and is not empty.
+        When the name is not one plain folder name (:func:`contained`) or the folder already
+        exists and is not empty.
     """
     name = name or datetime.now(UTC).strftime("run-%Y%m%d-%H%M%S")
-    run = Path(parent) / name
+    run = contained(Path(parent), name, "run name")
     if run.exists() and any(run.iterdir()):
         raise InputError(
             f"{run} already exists and is not empty; choose another run name. "

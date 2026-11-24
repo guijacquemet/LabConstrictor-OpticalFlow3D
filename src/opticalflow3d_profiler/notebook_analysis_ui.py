@@ -37,7 +37,7 @@ from .pipeline import checked_settings, run_experiment
 from .progress import TqdmTracker
 from .qc_export import export_qc_figures
 from .report_link import show_link
-from .results import create_run
+from .results import contained, create_run
 from .validation import InputError
 
 
@@ -63,7 +63,7 @@ class ProcessStep:
             raise InputError("Load the experiment in section 1 first.")
         settings = self.settings.run_settings()
         checked_settings(settings)  # before the run folder: a refusal never uses up its name
-        run = create_run(session.results_root, self.run_name.value.strip() or None)
+        run = create_run(session.results_root, self.run_name.value or None)  # as typed
         print(f"Run folder: {run}")
         manifest = run_experiment(
             session.metadata, settings, run, progress=LOG_ONLY, tracker=TqdmTracker()
@@ -225,7 +225,7 @@ class ReportStep:
         if "design" not in analysis:
             raise InputError("Confirm the experimental design first.")
         features = analysis["features"]
-        out = Path(features.sources[0]) / "analysis" / self.name.value.strip()
+        out = contained(Path(features.sources[0]) / "analysis", self.name.value, "report name")
         path, result, _ = run_report(features, analysis["design"], out, TqdmTracker())
         analysis["report"] = result
         print(result.summary().split("\n\n")[1] if "\n\n" in result.summary() else "")

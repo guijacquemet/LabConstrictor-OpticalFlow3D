@@ -34,7 +34,7 @@ from .analysis import FeatureSet
 from .feature_dictionary import AXIAL, BIOLOGICAL, FeatureDef
 from .naming import find_column
 from .progress import Tracker
-from .results import distribution_identity, now, write_json
+from .results import contained, distribution_identity, now, write_json
 from .validation import InputError
 
 KEY = ("condition", "biological_repeat", "technical_repeat", "position_id")
@@ -221,7 +221,7 @@ def run_report(
     from morphocoverage.workflows import report, scan_design
     from morphocoverage.workflows.html_report import html_report
 
-    out_dir = Path(out_dir)
+    out_dir = contained(Path(out_dir).parent, Path(out_dir).name, "report folder name")
     if out_dir.exists():
         raise InputError(f"{out_dir} exists; reports are never overwritten.")
     data = coverage_input(features, design)
