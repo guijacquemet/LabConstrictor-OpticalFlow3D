@@ -284,3 +284,12 @@ def test_angular_entropy_refuses_unresolved_resolutions():
         angular_entropy(TWO_STREAMS, 361)
     issues = check_feature_settings(FeatureSettings(angle_bins=10_000), ForegroundSpec())
     assert "angle_bins_too_large" in {i.code for i in issues}
+
+
+def test_angular_entropy_refuses_empty_or_non_finite_directions():
+    # Round 4: [] and [NaN] returned a plausible-looking 0.15.
+    for bad in (np.array([]), np.array([np.nan]), np.array([0.1, np.inf])):
+        with pytest.raises(ValueError, match="finite direction"):
+            angular_entropy(bad, 36)
+    with pytest.raises(ValueError, match="outside 2..360"):
+        features(flow(), FeatureSettings(reliability_mode="none", angle_bins=361))

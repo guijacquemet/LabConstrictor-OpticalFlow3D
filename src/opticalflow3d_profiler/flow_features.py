@@ -250,6 +250,9 @@ def angular_entropy(theta: np.ndarray, resolution_bins: int) -> float:
     nearest points, the kernel is applied by FFT, and ``H`` is the trapezoid sum, whose
     error for a smooth periodic density is far below the grid spacing.
     """
+    theta = np.asarray(theta, dtype=np.float64)
+    if theta.size == 0 or not np.isfinite(theta).all():
+        raise ValueError("angular_entropy needs at least one finite direction (round 4).")
     if not 2 <= resolution_bins <= MAX_ANGLE_BINS:
         raise ValueError(
             f"angle_bins={resolution_bins} is outside 2..{MAX_ANGLE_BINS}, where the entropy grid "
@@ -513,6 +516,8 @@ def frame_features(
     FeatureRow
         Values (NaN when undefined) and the reason of every undefined value.
     """
+    if not 2 <= settings.angle_bins <= MAX_ANGLE_BINS:  # also for direct calls (round 4)
+        raise ValueError(f"angle_bins={settings.angle_bins} is outside 2..{MAX_ANGLE_BINS}.")
     row = FeatureRow({}, {})
     scale = velocity_scale(calibration)
     vx, vy = flow["vx"] * scale.x, flow["vy"] * scale.y

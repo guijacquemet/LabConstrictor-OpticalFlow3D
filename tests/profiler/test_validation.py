@@ -112,3 +112,51 @@ def test_calibration_must_be_finite_before_and_after_conversion():
     with pytest.raises(InputError, match="positive finite"):
         to_minutes(float("nan"), "s")
     assert to_micrometres(650, "nm") == pytest.approx(0.65)
+
+
+def test_nan_and_infinite_settings_are_refused_not_read_as_empty():
+    # Round 4: a NaN foreground or motion threshold selected nothing and reported 0.
+    from opticalflow3d_profiler.config import FeatureSettings, ForegroundSpec
+    from opticalflow3d_profiler.notebook_ui import number
+    from opticalflow3d_profiler.validation import InputError, check_feature_settings
+
+    for text in ("nan", "inf", "-inf", " NaN "):
+        with pytest.raises(InputError, match="not a finite number"):
+            number(text)
+    assert number(" 2.5 ") == 2.5 and number("") is None
+    cases = [
+        (FeatureSettings(reliability_mode="absolute", reliability_value=float("nan")),
+         ForegroundSpec()),
+        (FeatureSettings(reliability_mode="none", motion_threshold=float("nan")), ForegroundSpec()),
+        (FeatureSettings(reliability_mode="none"), ForegroundSpec("threshold", float("inf"))),
+    ]  # fmt: skip
+    for features, foreground in cases:
+        assert "non_finite_setting" in codes(check_feature_settings(features, foreground))
+
+
+def test_calibration_underflow_and_direct_objects_are_refused():
+    from opticalflow3d_profiler.validation import (
+        InputError,
+        calibration_issues,
+        to_micrometres,
+        to_minutes,
+    )
+
+    with pytest.raises(InputError, match="too small to convert"):
+        to_minutes(1e-320, "ms")
+    with pytest.raises(InputError, match="too small to convert"):
+        to_micrometres(5e-324, "nm")
+    bad = Calibration(pixel_size_x=float("inf"), pixel_size_y=0.65, pixel_size_z=2.0,
+                      frame_interval=1.0)  # fmt: skip
+    assert codes(calibration_issues(bad)) == {"invalid_calibration"}
+    assert calibration_issues(Calibration(0.65, 0.65, 2.0, 1.0)) == []
+    assert calibration_issues(Calibration()) == []  # unknown values are allowed, never guessed
+
+
+def test_resource_estimates_refuse_absurd_sigmas(tmp_path):
+    from opticalflow3d_profiler.flow_backend import estimate_resources
+    from opticalflow3d_profiler.validation import InputError
+
+    with pytest.raises(InputError, match="sigma_too_large|at most"):
+        estimate_resources({"T": 15, "Z": 11, "Y": 64, "X": 64}, 2,
+                           FlowParameters(mode="xyz", t_sig=1e300), tmp_path)  # fmt: skip

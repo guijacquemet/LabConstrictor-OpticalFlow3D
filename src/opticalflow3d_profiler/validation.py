@@ -382,6 +382,8 @@ def _convert(value: float | None, unit: str, table: dict[str, float], kind: str)
     converted = float(value) * table[key]
     if not math.isfinite(converted):  # 1e308 mm overflows in µm
         raise InputError(f"A {kind} calibration of {value} {key} is too large to convert.")
+    if not converted > 0:  # 1e-320 ms underflows to 0 minutes
+        raise InputError(f"A {kind} calibration of {value} {key} is too small to convert.")
     return converted
 
 
@@ -423,6 +425,67 @@ def check_calibration(calibration: Calibration) -> list[Issue]:
     return issues
 
 
+def non_finite_settings(features: FeatureSettings, foreground: ForegroundSpec) -> list[Issue]:
+    """Refuse a numeric setting that is NaN or infinite (round 4).
+
+    ``intensity > NaN`` is false everywhere, so a NaN foreground threshold would read as an
+    empty foreground and a NaN motion threshold as no moving region: zeros that were never
+    measured.
+    """
+    values = {
+        "foreground threshold": foreground.threshold,
+        "reliability value": features.reliability_value,
+        "moving-region threshold": features.motion_threshold,
+        "min_direction_speed": features.min_direction_speed,
+        "aligned_angle_deg": features.aligned_angle_deg,
+    }
+    bad = [
+        f"{name}={value}"
+        for name, value in values.items()
+        if value is not None and not (isinstance(value, int | float) and math.isfinite(value))
+    ]
+    if not bad:
+        return []
+    return [
+        Issue(
+            "error",
+            "non_finite_setting",
+            f"These settings are not finite numbers: {', '.join(bad)}.",
+            "Enter ordinary numbers (NaN and infinity are never accepted).",
+        )
+    ]
+
+
+def calibration_issues(calibration: Calibration) -> list[Issue]:
+    """Refuse a calibration value that is given but not a positive finite number (round 4).
+
+    Covers a ``Calibration`` built directly in Python, which does not pass through the
+    unit conversions.
+    """
+    values = {
+        "pixel_size_x": calibration.pixel_size_x,
+        "pixel_size_y": calibration.pixel_size_y,
+        "pixel_size_z": calibration.pixel_size_z,
+        "frame_interval": calibration.frame_interval,
+    }
+    bad = [
+        f"{name}={value}"
+        for name, value in values.items()
+        if value is not None
+        and not (isinstance(value, int | float) and math.isfinite(value) and value > 0)
+    ]
+    if not bad:
+        return []
+    return [
+        Issue(
+            "error",
+            "invalid_calibration",
+            f"Calibration values must be positive finite numbers: {', '.join(bad)}.",
+            "Enter the pixel sizes, Z spacing and frame interval, or leave a value empty.",
+        )
+    ]
+
+
 def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec) -> list[Issue]:
     """Check feature and foreground settings before anything is computed.
 
@@ -438,7 +501,7 @@ def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec
     list of Issue
         Errors for missing or impossible values.
     """
-    issues: list[Issue] = []
+    issues: list[Issue] = non_finite_settings(features, foreground)
     mode, value = features.reliability_mode, features.reliability_value
     if mode != "none" and value is None:
         issues.append(

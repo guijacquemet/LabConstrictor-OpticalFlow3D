@@ -14,6 +14,8 @@ section's output area, never as tracebacks.
 
 from __future__ import annotations
 
+import math
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,9 +82,17 @@ def text(description: str, value: str = "", placeholder: str = "") -> widgets.Te
 
 
 def number(value: str) -> float | None:
-    """Return a float from a text field, ``None`` when empty."""
+    """Return a finite float from a text field, ``None`` when empty.
+
+    'nan', 'inf' and '-inf' are refused (round 4): they would silently select nothing.
+    """
     value = value.strip()
-    return float(value) if value else None
+    if not value:
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise InputError(f"'{value}' is not a finite number; enter an ordinary number.")
+    return parsed
 
 
 def guarded(output: widgets.Output, action: Callable[[], None]) -> Callable:

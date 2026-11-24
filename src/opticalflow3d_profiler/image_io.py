@@ -221,7 +221,11 @@ def _scaled(
     if not math.isfinite(number) or number <= 0:
         notes.append(f"{name}={value} is not a valid positive value.")
         return None
-    return number * table[key]
+    converted = number * table[key]
+    if not (math.isfinite(converted) and converted > 0):  # overflow or underflow on conversion
+        notes.append(f"{name}={value} {unit} cannot be converted to a usable value.")
+        return None
+    return converted
 
 
 def validate_image(spec: ImageSpec, header: ImageHeader) -> None:

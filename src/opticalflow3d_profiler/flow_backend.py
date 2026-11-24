@@ -39,6 +39,7 @@ from .image_io import ImageHeader, dimensions, file_identity, read_frames, valid
 from .progress import Stage, Tracker
 from .validation import (
     InputError,
+    check_sigmas,
     check_time_and_depth,
     output_frame_map,
     raise_for_errors,
@@ -155,6 +156,7 @@ def estimate_resources(
     ResourceEstimate
         The estimate.
     """
+    raise_for_errors(check_sigmas(params))  # tSig=1e300 would give an absurd window (round 4)
     voxels = dims["Z"] * dims["Y"] * dims["X"]
     n_out = len(output_frame_map(dims["T"], params))
     existing = Path(output_dir)
