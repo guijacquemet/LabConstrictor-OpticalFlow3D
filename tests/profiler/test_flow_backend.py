@@ -119,7 +119,20 @@ def test_resource_estimate_full_size_dataset(tmp_path):
     assert 10e9 < estimate.peak_ram_bytes < 12e9
     assert estimate.output_bytes == 9 * 11 * 1840 * 1840 * 28
     per_slice = estimate_resources(dims, 2, FlowParameters(mode="xy_per_slice"), tmp_path)
-    assert per_slice.output_bytes == 9 * 11 * 1840 * 1840 * 20  # no vz in per-slice mode
+    assert per_slice.output_bytes == 9 * 11 * 1840 * 1840 * 24  # no vz; float64 reliability
+
+
+@pytest.mark.parametrize("mode", ["xyz", "xy_per_slice"])
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_output_estimate_matches_the_arrays_actually_returned(mode, dtype):
+    # Round 3: the per-slice estimate assumed 4-byte reliability; calc_flow2D gives float64.
+    from opticalflow3d_profiler.flow_backend import compute_frame, output_bytes_per_voxel
+
+    params = FlowParameters(mode=mode, output_dtype=dtype)
+    window = np.random.default_rng(0).random((params.window_length, 4, 24, 24))
+    arrays = compute_frame(window, params)
+    voxels = 4 * 24 * 24
+    assert sum(a.nbytes for a in arrays.values()) == voxels * output_bytes_per_voxel(params)
 
 
 def test_upstream_licence_ships_with_the_python_files():

@@ -119,6 +119,19 @@ def available_memory() -> int | None:
         return None
 
 
+def output_bytes_per_voxel(params: FlowParameters) -> int:
+    """Return the written bytes per voxel of one output, by the arrays compute_frame returns.
+
+    Velocities are in ``output_dtype``. Reliability is upstream's: float32 from 3-D
+    ``calc_flow3D``, float64 from per-slice ``calc_flow2D`` (not cast). An unresolved
+    ``auto`` mode counts the larger, 3-D velocities with float64 reliability.
+    """
+    velocity = np.dtype(params.output_dtype).itemsize
+    if params.mode == "xy_per_slice":
+        return 2 * velocity + 8
+    return 3 * velocity + (4 if params.mode == "xyz" else 8)
+
+
 def estimate_resources(
     dims: dict[str, int], itemsize: int, params: FlowParameters, output_dir: Path
 ) -> ResourceEstimate:
@@ -142,15 +155,13 @@ def estimate_resources(
     """
     voxels = dims["Z"] * dims["Y"] * dims["X"]
     n_out = len(output_frame_map(dims["T"], params))
-    out_item = np.dtype(params.output_dtype).itemsize
     existing = Path(output_dir)
     while not existing.exists():
         existing = existing.parent
     return ResourceEstimate(
         peak_ram_bytes=voxels * (BYTES_PER_VOXEL_PEAK + params.window_length * itemsize),
         available_ram_bytes=available_memory(),
-        # vx, vy (and vz except per slice; 'auto' unresolved counts it) plus reliability
-        output_bytes=n_out * voxels * ((2 if params.mode == "xy_per_slice" else 3) * out_item + 4),
+        output_bytes=n_out * voxels * output_bytes_per_voxel(params),
         free_disk_bytes=shutil.disk_usage(existing).free,
         n_outputs=n_out,
         seconds=n_out * voxels * SECONDS_PER_VOXEL,

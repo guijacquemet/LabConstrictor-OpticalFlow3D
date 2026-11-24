@@ -183,3 +183,26 @@ def test_ome_default_unit_notes_reach_the_section_1_summary(tmp_path):
     table = header_summary(inspect_tiff(path))
     notes = table.loc[table["field"] == "note", "value"]
     assert notes.str.contains("TimeIncrement (unit not stated: OME default s)", regex=False).any()
+
+
+@pytest.mark.parametrize("header_axes", ["EZYX", "HZYX", "AZYX", "RZYX", "0ZYX"])
+def test_other_named_axes_are_refused_not_read_as_time(tmp_path, header_axes):
+    # Round 3: a named E (or H, A, R, 0) axis was user-confirmable and accepted as T.
+    path = tmp_path / "named.tif"
+    tifffile.imwrite(path, np.zeros((7, 3, 8, 8), np.uint16), metadata={"axes": header_axes},
+                     photometric="minisblack")  # fmt: skip
+    header = inspect_tiff(path)
+    if header.header_axes != header_axes:
+        pytest.skip(f"tifffile reads {header_axes} as {header.header_axes}")
+    with pytest.raises(InputError, match="axes_contradict_header"):
+        validate_image(ImageSpec(path, "TZYX"), header)
+
+
+@pytest.mark.parametrize("header_axes", ["QZYX", "TQYX"])
+def test_unknown_axes_remain_the_users_to_confirm(tmp_path, header_axes):
+    path = tmp_path / "unknown.tif"
+    tifffile.imwrite(path, np.zeros((7, 3, 8, 8), np.uint16), metadata={"axes": header_axes},
+                     photometric="minisblack")  # fmt: skip
+    header = inspect_tiff(path)
+    assert header.header_axes == header_axes
+    validate_image(ImageSpec(path, "TZYX"), header)  # no refusal
