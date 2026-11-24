@@ -631,3 +631,22 @@ def test_a_manifest_published_meanwhile_is_never_replaced(tmp_path):
     fresh = tmp_path / "new.json"
     write_json_new(fresh, {"a": 1})
     assert json.loads(fresh.read_text()) == {"a": 1}
+
+
+def test_manifests_are_written_on_storage_without_hard_links(tmp_path, monkeypatch):
+    # Owner decision: without hard links (some SMB/exFAT shares), fall back to O_EXCL.
+    import errno
+
+    from opticalflow3d_profiler import results
+
+    def no_links(*_args):
+        raise OSError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(results.os, "link", no_links)
+    target = tmp_path / "run_manifest.json"
+    results.write_json_new(target, {"kind": "ours"})
+    assert json.loads(target.read_text()) == {"kind": "ours"}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["run_manifest.json"]
+    with pytest.raises(InputError, match="not replaced"):
+        results.write_json_new(target, {"kind": "second"})
+    assert json.loads(target.read_text()) == {"kind": "ours"}

@@ -58,7 +58,9 @@ run twice or overwritten.` Choose a new run name.
 
 #### `run_manifest.json`
 
-Written when the run ends. It records everything needed to trace a number back:
+Written when the run ends, never replacing an existing file (atomically through a hard link; on
+storage without hard links, such as some SMB or exFAT shares, by exclusive creation). It records
+everything needed to trace a number back:
 
 | Key | Content |
 |---|---|
