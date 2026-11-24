@@ -10,6 +10,7 @@ and published with one rename, so an interrupted run leaves no half-written resu
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -229,7 +230,7 @@ def flow_identity(
         "upstream": upstream_identity(),
         "frame_map": output_frame_map(dims["T"], params),
         **(
-            {"brightness_correction": implementation_identity()}
+            {"brightness_correction": correction_identity()}
             if params.brightness_equalisation != "none"
             else {}
         ),
@@ -283,6 +284,17 @@ def compute_frame(window: np.ndarray, params: FlowParameters) -> dict[str, np.nd
         "vz": vz.astype(dtype, copy=False),
         "rel": rel,
     }
+
+
+def correction_identity() -> dict[str, str | None]:
+    """Return the identity of the code that corrects a window: the adapter and its caller.
+
+    :func:`brightness.implementation_identity` (normalization version, ``time_series`` and
+    ``brightness.py``) plus the SHA-256 of :func:`flow_window`, which decides when and how
+    the correction is applied (round 3: a changed caller kept the cached corrected flow).
+    """
+    caller = inspect.getsource(flow_window).encode("utf-8")
+    return {**implementation_identity(), "flow_window_sha256": hashlib.sha256(caller).hexdigest()}
 
 
 def flow_window(window: np.ndarray, params: FlowParameters) -> tuple[dict, dict[str, object]]:
@@ -438,6 +450,7 @@ def _flow_manifest(
         "outputs": outputs,
         "velocity_units": {"vx": "pixel/frame", "vy": "pixel/frame", "vz": "slice/frame"},
         "reliability": "smallest eigenvalue of the Lucas-Kanade structure tensor (upstream)",
+        "brightness_qc": implementation_identity(),
         "application_version": __version__,
         "python": sys.version.split()[0],
         "numpy": np.__version__,

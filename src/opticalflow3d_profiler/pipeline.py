@@ -17,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from .brightness import WARNING_CHANGE_PER_FRAME
+from .brightness import implementation_identity as brightness_identity
 from .config import Calibration, FeatureSettings, FlowParameters, ForegroundSpec, ImageSpec
 from .config import to_record as record
 from .experiment import METADATA_COLUMNS
@@ -191,10 +192,11 @@ def frame_rows(
                 settings.features,
             )
             recorded = result.manifest.get("outputs", [{}] * (index + 1))[index]
+            current = brightness_qc_current(result)
             features.put(
                 "qc_brightness_change_per_frame",
-                recorded.get("brightness_change_per_frame"),
-                brightness_reason(recorded),
+                recorded.get("brightness_change_per_frame") if current else None,
+                brightness_reason(recorded) if current else STALE_BRIGHTNESS_QC,
             )
             row: dict[str, object] = {
                 "fov_uid": result.name,
@@ -213,6 +215,22 @@ def frame_rows(
     return rows
 
 
+STALE_BRIGHTNESS_QC = (
+    "not reused: the reused optical flow recorded its brightness QC with another brightness "
+    "implementation (the velocities do not depend on it; recompute the flow to measure it)"
+)
+
+
+def brightness_qc_current(result: FlowResult) -> bool:
+    """Return whether a flow result's brightness QC was measured by the current implementation.
+
+    The brightness trend is measured even without correction, by code that is not part of the
+    velocity identity; reused velocities stay valid, their brightness QC only when the
+    recorded implementation is the current one (round 3).
+    """
+    return result.manifest.get("brightness_qc") == brightness_identity()
+
+
 def brightness_reason(recorded: dict[str, object]) -> str:
     """Return why an output's recorded brightness change has no value (m6)."""
     if "brightness_change_per_frame" not in recorded:
@@ -224,6 +242,8 @@ def brightness_reason(recorded: dict[str, object]) -> str:
 
 def brightness_warning(result: FlowResult, equalised: bool) -> str:
     """Return a warning when the global brightness changes markedly, or an empty string."""
+    if not brightness_qc_current(result):
+        return "Brightness QC not reused: " + STALE_BRIGHTNESS_QC + "."
     changes = [
         abs(o["brightness_change_per_frame"])
         for o in result.manifest.get("outputs", [])

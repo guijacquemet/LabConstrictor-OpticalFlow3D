@@ -169,6 +169,15 @@ def test_correction_code_identity_invalidates_cached_corrected_flow(flow_run, mo
             after = flow_backend.flow_identity(spec, header, corrected, source)
         assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
     assert "commit" not in before["brightness_correction"]  # a wheel install has none
+    # Round 3: a change of flow_window, which applies the correction, changes it too.
+    real = flow_backend.inspect.getsource
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            flow_backend.inspect, "getsource",
+            lambda obj: real(obj) + "# edited" if obj is flow_backend.flow_window else real(obj),
+        )  # fmt: skip
+        after = flow_backend.flow_identity(spec, header, corrected, source)
+    assert flow_backend.identity_key(after) != flow_backend.identity_key(before)
 
 
 def test_a_failing_window_closes_progress_and_removes_the_partial_folder(

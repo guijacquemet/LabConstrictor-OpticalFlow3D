@@ -524,3 +524,20 @@ def test_a_dictionary_describing_a_feature_twice_is_refused(experiment, tmp_path
     _edit_dictionary(a, lambda i: i["fov_features"].append(i["fov_features"][0]))
     with pytest.raises(InputError, match="twice"):
         load_runs([a])
+
+
+def test_reused_flow_keeps_its_velocities_but_not_stale_brightness_qc():
+    # Round 3: the brightness trend is measured without correction too, by code outside the
+    # velocity identity; reused flow must not carry QC of another implementation.
+    from types import SimpleNamespace
+
+    from opticalflow3d_profiler.brightness import implementation_identity
+    from opticalflow3d_profiler.pipeline import brightness_qc_current, brightness_warning
+
+    outputs = [{"brightness_change_per_frame": 0.5}]
+    current = SimpleNamespace(manifest={"brightness_qc": implementation_identity(),
+                                        "outputs": outputs})  # fmt: skip
+    other = SimpleNamespace(manifest={"brightness_qc": {"version": "0.7.1"}, "outputs": outputs})
+    assert brightness_qc_current(current) and not brightness_qc_current(other)
+    assert "changes by up to 50.0%" in brightness_warning(current, equalised=False)
+    assert brightness_warning(other, equalised=False).startswith("Brightness QC not reused")
