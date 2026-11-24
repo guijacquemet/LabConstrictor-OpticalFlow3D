@@ -16,6 +16,7 @@ import numpy as np
 from scipy import ndimage
 
 from .config import Calibration, FeatureSettings
+from .validation import MAX_ANGLE_BINS
 
 QUANTILES = (10, 25, 75, 90, 95)
 NO_AXIAL = "per-slice 2D optical flow has no axial component"
@@ -249,6 +250,11 @@ def angular_entropy(theta: np.ndarray, resolution_bins: int) -> float:
     nearest points, the kernel is applied by FFT, and ``H`` is the trapezoid sum, whose
     error for a smooth periodic density is far below the grid spacing.
     """
+    if not 2 <= resolution_bins <= MAX_ANGLE_BINS:
+        raise ValueError(
+            f"angle_bins={resolution_bins} is outside 2..{MAX_ANGLE_BINS}, where the entropy grid "
+            "resolves the kernel."
+        )
     h = _density_entropy(_grid_mass(theta), resolution_bins)
     h_kernel = _kernel_entropy(resolution_bins)
     top = np.log(2 * np.pi)

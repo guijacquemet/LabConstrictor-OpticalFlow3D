@@ -248,7 +248,11 @@ Because entropy is concave, `H` always lies between these two limits. There are 
 edges or anchor angle, so rotating every vector leaves the value unchanged, and moving one vector
 a little changes the value a little. Numerically, the density is evaluated on 65,536 points of the
 circle (each direction is spread linearly between its two nearest points), the kernel is applied
-by FFT, and the integral is a trapezoid sum.
+by FFT, and the integral is a trapezoid sum. The concavity bound holds for the continuous
+density; the grid computation follows it within its numerical error, which was measured: with
+`angle_bins` up to 360 (a 1° kernel, the largest allowed), a single direction placed anywhere on
+the grid gives at most 8.4 × 10⁻⁷ instead of 0, and rotations change the value by at most
+1.5 × 10⁻⁷. Finer kernels are not resolved by the grid and are refused (`angle_bins_too_large`).
 
 ### 5.4 Spatial heterogeneity → [glossary](features.md#spatial-heterogeneity)
 

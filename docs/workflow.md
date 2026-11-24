@@ -132,7 +132,7 @@ These feature settings are fixed at their defaults in the notebook (they are rec
 | Setting | Default | Meaning |
 |---|---|---|
 | `min_region_voxels` | 100 | A region with fewer analysed voxels has no regional value. |
-| `angle_bins` | 36 | Angular resolution of `xy_angular_entropy`: kernel SD = 360°/36 = 10°. |
+| `angle_bins` | 36 | Angular resolution of `xy_angular_entropy`: kernel SD = 360°/36 = 10°. Allowed: 2 to 360. |
 | `aligned_angle_deg` | 45 | Vectors within 45° of the dominant direction count as aligned. |
 | `min_direction_speed` | 0 | XY speed above which a vector has a direction for the angular features (0: every nonzero vector). |
 | `min_direction_vectors` | 20 | Fewer directed vectors make the angular features undefined. |

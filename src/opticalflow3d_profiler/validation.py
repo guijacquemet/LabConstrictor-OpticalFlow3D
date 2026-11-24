@@ -27,6 +27,12 @@ LENGTH_TO_MICROMETRE = {"nm": 1e-3, "um": 1.0, "µm": 1.0, "micron": 1.0, "mm": 
 TIME_TO_MINUTE = {"ms": 1 / 60000, "s": 1 / 60, "sec": 1 / 60, "min": 1.0, "h": 60.0}
 
 
+MAX_ANGLE_BINS = 360
+"""Finest angular resolution of the XY angular entropy: a 1° kernel. Measured on the 2**16-point
+grid: a single direction half a grid step off gives at most 8.4e-7 and rotations change the value
+by at most 1.5e-7 at 360; at 1024 these are 5.5e-6 and 1.0e-6 (round 3 of the audit)."""
+
+
 class InputError(ValueError):
     """Raised when an input cannot be analysed as configured."""
 
@@ -437,6 +443,16 @@ def check_feature_settings(features: FeatureSettings, foreground: ForegroundSpec
             issues.append(
                 Issue("error", f"{name}_too_small", f"{name} must be at least {minimum}.", "")
             )
+    if features.angle_bins > MAX_ANGLE_BINS:
+        issues.append(
+            Issue(
+                "error",
+                "angle_bins_too_large",
+                f"angle_bins must be at most {MAX_ANGLE_BINS} (a 1° kernel): finer kernels are not "
+                "resolved by the entropy's grid, which would break its rotation invariance.",
+                "Use the default 36 (a 10° kernel) or another value up to 360.",
+            )
+        )
     if features.min_direction_speed < 0:
         issues.append(
             Issue(
