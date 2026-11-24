@@ -31,6 +31,7 @@ from .progress import Tracker
 from .results import (
     claim_run,
     environment,
+    feature_implementation,
     implementation_identity,
     now,
     relative,
@@ -406,6 +407,9 @@ def write_feature_tables(
             "frame_identifier_columns": list(FRAME_ID_COLUMNS),
             "frame_features": dictionary_records(defs),
             "fov_features": dictionary_records(fov_dictionary(defs)),
+            "feature_implementation": feature_implementation(
+                dictionary_records(defs) + dictionary_records(fov_dictionary(defs))
+            ),
         },
     )
     return per_fov

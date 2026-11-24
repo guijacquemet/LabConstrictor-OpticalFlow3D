@@ -476,3 +476,51 @@ def test_refusing_a_finished_run_never_writes_into_it(tmp_path):
     with pytest.raises(InputError, match="never run twice"):
         claim_run(legacy)
     assert sorted(p.name for p in legacy.iterdir()) == before
+
+
+def _edit_dictionary(run, edit):
+    path = run / "features" / "feature_dictionary.json"
+    info = json.loads(path.read_text())
+    edit(info)
+    path.write_text(json.dumps(info))
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda i: i["feature_implementation"].update(code_sha256="0" * 64), "feature code"),
+        (lambda i: i["fov_features"][0].update(applicability="orientation"), "definitions"),
+        (lambda i: i.pop("feature_implementation"), "extracted before"),
+    ],
+    ids=["other code", "other definition", "older run"],
+)
+def test_runs_with_other_feature_definitions_or_code_are_never_combined(
+    experiment, tmp_path, edit, message
+):
+    # Round 3: old binned and new kernel entropy (and the vx_*/vy_* reclassification) had one
+    # name and unit, so runs of both were combined into one MorphoCoverage analysis.
+    from opticalflow3d_profiler.results import feature_implementation
+
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    b = _copy_run(run, tmp_path / "b", "b-")
+    load_runs([a, b])  # the same version: combined
+
+    def redo(info):  # an edited definition gets a new definitions hash, as a real one would
+        edit(info)
+        if "feature_implementation" in info and message == "definitions":
+            records = info["frame_features"] + info["fov_features"]
+            info["feature_implementation"] = feature_implementation(records)
+
+    _edit_dictionary(b, redo)
+    with pytest.raises(InputError, match=message):
+        load_runs([a, b])
+    load_runs([b])  # alone, a run is never combined with anything
+
+
+def test_a_dictionary_describing_a_feature_twice_is_refused(experiment, tmp_path):
+    _, _, run, _ = experiment
+    a = _copy_run(run, tmp_path / "a", "a-")
+    _edit_dictionary(a, lambda i: i["fov_features"].append(i["fov_features"][0]))
+    with pytest.raises(InputError, match="twice"):
+        load_runs([a])

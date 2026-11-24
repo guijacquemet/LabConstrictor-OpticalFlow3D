@@ -174,6 +174,37 @@ def implementation_identity() -> dict[str, object]:
     return {"version": __version__, "modules": len(files), "source_sha256": digest.hexdigest()}
 
 
+FEATURE_MODULES = (
+    "flow_features.py",
+    "temporal_features.py",
+    "foreground.py",
+    "brightness.py",
+    "feature_dictionary.py",
+    "pipeline.py",
+)
+"""The modules whose code decides feature values: masks, per-frame features, time averages,
+brightness QC, definitions and the code that applies them per frame."""
+
+
+def feature_implementation(records: list[dict[str, str]]) -> dict[str, str]:
+    """Return the identity of a run's features: their definitions and the code computing them.
+
+    ``definitions_sha256`` covers every definition written to ``feature_dictionary.json``
+    (name, formula, unit, use, undefined condition); ``code_sha256`` covers
+    :data:`FEATURE_MODULES`. Runs are combined only when both are equal (round 3 of the audit:
+    the old binned and the new kernel entropy shared one column name and unit).
+    """
+    package = Path(__file__).resolve().parent
+    code = hashlib.sha256()
+    for name in FEATURE_MODULES:
+        code.update(name.encode("utf-8") + b"\0" + (package / name).read_bytes() + b"\0")
+    definitions = json.dumps(records, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return {
+        "definitions_sha256": hashlib.sha256(definitions).hexdigest(),
+        "code_sha256": code.hexdigest(),
+    }
+
+
 def now() -> str:
     """Return the current UTC time in ISO 8601."""
     return datetime.now(UTC).isoformat(timespec="seconds")
